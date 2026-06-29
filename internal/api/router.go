@@ -19,7 +19,7 @@ type Server struct {
 	zips    *zipCache
 }
 
-func NewRouter(pool *pgxpool.Pool, sc *scanner.Scanner, w *scanner.Watcher, dataDir, apiKey string) http.Handler {
+func NewRouter(pool *pgxpool.Pool, sc *scanner.Scanner, w *scanner.Watcher, dataDir string) http.Handler {
 	s := &Server{
 		db:      pool,
 		scanner: sc,
@@ -32,33 +32,61 @@ func NewRouter(pool *pgxpool.Pool, sc *scanner.Scanner, w *scanner.Watcher, data
 	r.Use(middleware.Logger)
 	r.Use(middleware.Recoverer)
 
-	if apiKey != "" {
-		r.Use(apiKeyMiddleware(apiKey))
-	}
-
 	r.Get("/api/health", s.health)
 
-	r.Get("/api/libraries", s.listLibraries)
-	r.Post("/api/libraries", s.createLibrary)
-	r.Delete("/api/libraries/{id}", s.deleteLibrary)
-	r.Post("/api/libraries/{id}/scan", s.triggerScan)
+	// Public auth endpoints
+	r.Post("/api/auth/login", s.login)
+	r.Post("/api/auth/register", s.register)
 
-	r.Get("/api/books", s.listBooks)
-	r.Get("/api/books/{id}", s.getBook)
-	r.Get("/api/books/{id}/cover", s.getBookCover)
-	r.Get("/api/books/{id}/file", s.getBookFile)
-	r.Get("/api/books/{id}/manifest", s.getBookManifest)
-	r.Get("/api/books/{id}/content/*", s.getBookContent)
+	// Protected API endpoints
+	r.Group(func(r chi.Router) {
+		r.Use(s.authRequired)
 
-	r.Get("/api/series", s.listSeries)
-	r.Get("/api/series/{name}/books", s.getSeriesBooks)
+		r.Post("/api/auth/logout", s.logout)
+		r.Get("/api/auth/me", s.me)
 
-	r.Get("/api/books/{id}/progress", s.getProgress)
-	r.Put("/api/books/{id}/progress", s.putProgress)
+		r.Get("/api/libraries", s.listLibraries)
+		r.Post("/api/libraries", s.createLibrary)
+		r.Delete("/api/libraries/{id}", s.deleteLibrary)
+		r.Post("/api/libraries/{id}/scan", s.triggerScan)
 
-	// Serve frontend static files
+		r.Get("/api/books", s.listBooks)
+		r.Get("/api/books/{id}", s.getBook)
+		r.Get("/api/books/{id}/cover", s.getBookCover)
+		r.Get("/api/books/{id}/file", s.getBookFile)
+		r.Get("/api/books/{id}/manifest", s.getBookManifest)
+		r.Get("/api/books/{id}/content/*", s.getBookContent)
+
+		r.Get("/api/series", s.listSeries)
+		r.Get("/api/series/{name}/books", s.getSeriesBooks)
+
+		r.Get("/api/tags", s.listTags)
+
+		r.Get("/api/books/{id}/progress", s.getProgress)
+		r.Put("/api/books/{id}/progress", s.putProgress)
+
+		// Admin-only
+		r.Group(func(r chi.Router) {
+			r.Use(s.adminRequired)
+			r.Get("/api/users", s.listUsers)
+			r.Post("/api/users", s.createUser)
+			r.Patch("/api/users/{id}", s.updateUser)
+			r.Delete("/api/users/{id}", s.deleteUser)
+		})
+	})
+
+	// Serve frontend — clean URLs + static assets
 	sub, _ := fs.Sub(frontend.FS, "dist")
 	fileServer := http.FileServer(http.FS(sub))
+	r.Get("/reader", func(w http.ResponseWriter, r *http.Request) {
+		http.ServeFileFS(w, r, sub, "reader.html")
+	})
+	r.Get("/settings", func(w http.ResponseWriter, r *http.Request) {
+		http.ServeFileFS(w, r, sub, "settings.html")
+	})
+	r.Get("/login", func(w http.ResponseWriter, r *http.Request) {
+		http.ServeFileFS(w, r, sub, "login.html")
+	})
 	r.Handle("/*", fileServer)
 
 	return r
@@ -70,20 +98,4 @@ func (s *Server) health(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	respond(w, map[string]string{"status": "ok"})
-}
-
-func apiKeyMiddleware(key string) func(http.Handler) http.Handler {
-	return func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			k := r.Header.Get("X-API-Key")
-			if k == "" {
-				k = r.URL.Query().Get("api_key")
-			}
-			if k != key {
-				http.Error(w, "unauthorized", http.StatusUnauthorized)
-				return
-			}
-			next.ServeHTTP(w, r)
-		})
-	}
 }

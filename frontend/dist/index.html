@@ -5,20 +5,66 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>yomekuro</title>
   <link rel="stylesheet" href="/style.css">
+  <script>
+    (function() {
+      document.documentElement.setAttribute(
+        'data-theme', localStorage.getItem('theme') || 'dark'
+      );
+    })();
+  </script>
 </head>
-<body>
-  <header class="app-header">
-    <span class="logo">よめくろ</span>
-    <form class="search-form" id="search-form" onsubmit="return false">
-      <input type="search" id="search-input" placeholder="Search titles or authors…" autocomplete="off">
-    </form>
-  </header>
-  <main>
-    <div id="books-grid" class="books-grid"></div>
-    <p id="empty-msg" class="empty-msg" hidden>
-      No books found. Add a library via API and trigger a scan.
-    </p>
-  </main>
+<body class="page-library">
+
+  <aside class="sidebar" id="sidebar">
+    <div class="sidebar-header">
+      <a class="logo" id="logo-home">よめくろ</a>
+      <button class="sidebar-close" id="sidebar-close" aria-label="Close">✕</button>
+    </div>
+
+    <nav class="sidebar-nav">
+      <button class="nav-item active" id="nav-all-titles">Library</button>
+      <div class="nav-section-label">Titles</div>
+      <div class="series-list" id="series-list">
+        <span class="nav-loading">Loading…</span>
+      </div>
+    </nav>
+
+    <div class="sidebar-footer">
+      <a class="footer-btn footer-link" href="/settings">Settings</a>
+    </div>
+  </aside>
+
+  <div class="sidebar-overlay" id="sidebar-overlay"></div>
+
+  <div class="main-wrap">
+    <header class="main-header">
+      <button class="hamburger" id="hamburger" aria-label="Open sidebar">☰</button>
+      <nav class="breadcrumb" id="breadcrumb" hidden>
+        <button id="btn-back" class="breadcrumb-back">Library</button>
+        <span class="breadcrumb-sep">/</span>
+      </nav>
+      <span class="view-title" id="view-title">Library</span>
+    </header>
+
+    <div class="filter-bar">
+      <div class="search-row">
+        <input type="search" id="search-input" placeholder="Search titles…" autocomplete="off">
+        <button id="btn-search">Search</button>
+      </div>
+      <div class="genre-row">
+        <span class="genre-label">Genres</span>
+        <div class="tag-chips" id="tag-chips">
+          <span class="tag-chips-empty" id="tag-chips-empty" hidden></span>
+        </div>
+      </div>
+    </div>
+
+    <main>
+      <div id="books-grid" class="books-grid"></div>
+      <p id="empty-msg" class="empty-msg" hidden></p>
+    </main>
+  </div>
+
   <script src="/app.js"></script>
 </body>
 </html>

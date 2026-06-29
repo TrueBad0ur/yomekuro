@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>yomekuro — Login</title>
+  <link rel="stylesheet" href="/style.css">
+  <script>
+    (function() {
+      document.documentElement.setAttribute(
+        'data-theme', localStorage.getItem('theme') || 'dark'
+      );
+    })();
+  </script>
+</head>
+<body class="page-login">
+  <div class="login-wrap">
+    <div class="login-logo">よめくろ</div>
+
+    <div class="login-tabs">
+      <button class="login-tab active" id="tab-login">Login</button>
+      <button class="login-tab" id="tab-register">Register</button>
+    </div>
+
+    <form class="login-form" id="login-form" autocomplete="on">
+      <div class="login-field">
+        <label for="login-username">Username</label>
+        <input id="login-username" type="text" autocomplete="username" required>
+      </div>
+      <div class="login-field">
+        <label for="login-password">Password</label>
+        <input id="login-password" type="password" autocomplete="current-password" required>
+      </div>
+      <p class="login-error" id="login-error" hidden></p>
+      <button type="submit" class="login-submit">Login</button>
+    </form>
+
+    <form class="login-form" id="register-form" hidden autocomplete="on">
+      <div class="login-field">
+        <label for="reg-username">Username</label>
+        <input id="reg-username" type="text" autocomplete="username" required>
+      </div>
+      <div class="login-field">
+        <label for="reg-password">Password</label>
+        <input id="reg-password" type="password" autocomplete="new-password" required>
+      </div>
+      <p class="login-error" id="reg-error" hidden></p>
+      <button type="submit" class="login-submit">Create account</button>
+    </form>
+  </div>
+
+  <script src="/login.js"></script>
+</body>
+</html>

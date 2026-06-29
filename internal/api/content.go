@@ -16,6 +16,36 @@ import (
 	"github.com/truebad0ur/yomekuro/internal/epub"
 )
 
+type tocEntryDTO struct {
+	Label      string        `json:"label"`
+	Href       string        `json:"href,omitempty"`
+	SpineIndex int           `json:"spine_index"`
+	Children   []tocEntryDTO `json:"children,omitempty"`
+}
+
+func enrichTOC(entries []epub.TocEntry, spine []epub.SpineItem) []tocEntryDTO {
+	result := make([]tocEntryDTO, 0, len(entries))
+	for _, e := range entries {
+		base := e.Href
+		if idx := strings.LastIndex(base, "#"); idx >= 0 {
+			base = base[:idx]
+		}
+		spineIdx := -1
+		for i, s := range spine {
+			if s.Href == base {
+				spineIdx = i
+				break
+			}
+		}
+		dto := tocEntryDTO{Label: e.Label, Href: e.Href, SpineIndex: spineIdx}
+		if len(e.Children) > 0 {
+			dto.Children = enrichTOC(e.Children, spine)
+		}
+		result = append(result, dto)
+	}
+	return result
+}
+
 // ── LRU zip cache ─────────────────────────────────────────────────────────────
 
 type zipCache struct {
@@ -85,6 +115,7 @@ type manifestResponse struct {
 	Title            string         `json:"title"`
 	ReadingDirection string         `json:"reading_direction"`
 	Spine            []spineItemDTO `json:"spine"`
+	TOC              []tocEntryDTO  `json:"toc"`
 }
 
 type spineItemDTO struct {
@@ -107,20 +138,21 @@ func (s *Server) getBookManifest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	book, err := epub.Open(b.Path, "")
+	spine, _, toc, err := epub.OpenManifest(b.Path)
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, "could not open epub")
 		return
 	}
 
-	spine := make([]spineItemDTO, len(book.Spine))
-	for i, item := range book.Spine {
-		spine[i] = spineItemDTO{Href: item.Href, MediaType: item.MediaType}
+	spineDTO := make([]spineItemDTO, len(spine))
+	for i, item := range spine {
+		spineDTO[i] = spineItemDTO{Href: item.Href, MediaType: item.MediaType}
 	}
 	respond(w, manifestResponse{
 		Title:            b.Title,
 		ReadingDirection: b.ReadingDirection,
-		Spine:            spine,
+		Spine:            spineDTO,
+		TOC:              enrichTOC(toc, spine),
 	})
 }
 

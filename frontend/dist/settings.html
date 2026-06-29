@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Settings — yomekuro</title>
+  <link rel="stylesheet" href="/style.css">
+  <script>
+    (function() {
+      document.documentElement.setAttribute(
+        'data-theme', localStorage.getItem('theme') || 'dark'
+      );
+    })();
+  </script>
+</head>
+<body class="page-settings">
+  <header class="settings-page-header">
+    <a href="/" class="back-link">Library</a>
+    <h1 class="settings-page-title">Settings</h1>
+    <button id="btn-logout" class="logout-btn">Logout</button>
+  </header>
+
+  <main class="settings-page-main">
+
+    <section class="settings-section">
+      <h2 class="settings-section-title">Appearance</h2>
+      <div class="settings-row">
+        <span class="settings-row-label">Theme</span>
+        <div class="theme-switcher">
+          <button class="theme-opt" data-theme="dark"  id="btn-dark">Dark</button>
+          <button class="theme-opt" data-theme="light" id="btn-light">Light</button>
+        </div>
+      </div>
+    </section>
+
+    <section class="settings-section">
+      <h2 class="settings-section-title">Libraries</h2>
+      <div id="libraries-list" class="settings-libraries">
+        <p style="color:var(--text-dim);font-size:.88rem">Loading…</p>
+      </div>
+      <div class="settings-row" style="margin-top:.75rem;gap:.5rem;flex-wrap:wrap">
+        <input id="lib-name" type="text" placeholder="Name" class="user-input">
+        <input id="lib-path" type="text" placeholder="Path (e.g. /library)" class="user-input" style="flex:2">
+        <button id="btn-add-library">Add Library</button>
+        <p class="login-error" id="add-library-error" hidden></p>
+      </div>
+    </section>
+
+    <!-- Admin only -->
+    <section class="settings-section" id="users-section" hidden>
+      <h2 class="settings-section-title">Users</h2>
+      <div id="users-list" class="settings-users"></div>
+      <div class="settings-row user-create-form" style="margin-top:.75rem;gap:.5rem;flex-wrap:wrap">
+        <input id="new-username" type="text" placeholder="Username" class="user-input">
+        <input id="new-password" type="password" placeholder="Password" class="user-input">
+        <label class="user-admin-label">
+          <input id="new-is-admin" type="checkbox"> Admin
+        </label>
+        <button id="btn-create-user">Add user</button>
+        <p class="login-error" id="create-user-error" hidden></p>
+      </div>
+    </section>
+
+  </main>
+
+  <script src="/settings.js"></script>
+</body>
+</html>

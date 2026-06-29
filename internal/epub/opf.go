@@ -6,6 +6,7 @@ import (
 	"net/url"
 	"path"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -249,14 +250,20 @@ func normalizeLanguage(lang string) string {
 }
 
 var leadingArticles = []string{"The ", "A ", "An "}
+var reNumbers = regexp.MustCompile(`\d+`)
 
 func computeSortTitle(title string) string {
 	for _, a := range leadingArticles {
 		if strings.HasPrefix(title, a) {
-			return title[len(a):]
+			title = title[len(a):]
+			break
 		}
 	}
-	return title
+	// Pad digit sequences to 6 chars so "2" < "10" lexicographically
+	return reNumbers.ReplaceAllStringFunc(title, func(s string) string {
+		n, _ := strconv.Atoi(s)
+		return fmt.Sprintf("%06d", n)
+	})
 }
 
 func validateISBN(s string) string {

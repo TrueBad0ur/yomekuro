@@ -1,0 +1,279 @@
+'use strict';
+
+// ── Auth guard ────────────────────────────────────────────────────────────────
+
+let currentUser = null;
+
+fetch('/api/auth/me').then(async r => {
+  if (!r.ok) { location.href = '/login'; return; }
+  currentUser = await r.json();
+  init();
+}).catch(() => { location.href = '/login'; });
+
+function init() {
+  applyTheme(localStorage.getItem('theme') || 'dark');
+  loadLibraries();
+  if (currentUser && currentUser.is_admin) {
+    document.getElementById('users-section').hidden = false;
+    loadUsers();
+  }
+}
+
+// ── Logout ────────────────────────────────────────────────────────────────────
+
+document.getElementById('btn-logout').addEventListener('click', async () => {
+  await fetch('/api/auth/logout', { method: 'POST' });
+  location.href = '/login';
+});
+
+// ── Theme ─────────────────────────────────────────────────────────────────────
+
+function applyTheme(theme) {
+  document.documentElement.setAttribute('data-theme', theme);
+  localStorage.setItem('theme', theme);
+  document.querySelectorAll('.theme-opt').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.theme === theme);
+  });
+}
+
+document.querySelectorAll('.theme-opt').forEach(btn => {
+  btn.addEventListener('click', () => applyTheme(btn.dataset.theme));
+});
+
+// ── Libraries ─────────────────────────────────────────────────────────────────
+
+async function loadLibraries() {
+  const list = document.getElementById('libraries-list');
+  let libs;
+  try {
+    libs = await fetch('/api/libraries').then(r => r.json());
+  } catch {
+    list.innerHTML = '<p style="color:var(--text-dim)">Failed to load libraries.</p>';
+    return;
+  }
+
+  list.innerHTML = '';
+  for (const lib of (libs.items || [])) {
+    const card = document.createElement('div');
+    card.className = 'library-card';
+    card.innerHTML = `
+      <div class="library-card-name">${esc(lib.name)}</div>
+      <div class="library-card-path">${esc(lib.path)}</div>
+      <div class="library-card-footer">
+        <span class="library-card-count" id="lc-${lib.id}">—</span>
+        <button class="sync-btn" id="sync-${lib.id}">Sync</button>
+      </div>`;
+    list.appendChild(card);
+
+    fetch(`/api/books?library=${lib.id}&limit=1`)
+      .then(r => r.json())
+      .then(d => {
+        const el = document.getElementById(`lc-${lib.id}`);
+        if (el) el.textContent = `${d.total} books`;
+      }).catch(() => {});
+
+    card.querySelector('.sync-btn').addEventListener('click', async function() {
+      this.disabled = true;
+      this.textContent = 'Syncing…';
+      try {
+        await fetch(`/api/libraries/${lib.id}/scan`, { method: 'POST' });
+        await new Promise(r => setTimeout(r, 3000));
+        const d = await fetch(`/api/books?library=${lib.id}&limit=1`).then(r => r.json());
+        const el = document.getElementById(`lc-${lib.id}`);
+        if (el) el.textContent = `${d.total} books`;
+        this.textContent = 'Done';
+        setTimeout(() => { this.textContent = 'Sync'; this.disabled = false; }, 1500);
+      } catch {
+        this.textContent = 'Sync';
+        this.disabled = false;
+      }
+    });
+  }
+}
+
+// ── Add Library ───────────────────────────────────────────────────────────────
+
+document.getElementById('btn-add-library').addEventListener('click', async () => {
+  const errEl = document.getElementById('add-library-error');
+  errEl.hidden = true;
+  const name = document.getElementById('lib-name').value.trim();
+  const path = document.getElementById('lib-path').value.trim();
+  if (!name || !path) {
+    errEl.textContent = 'Name and path are required';
+    errEl.hidden = false;
+    return;
+  }
+  const btn = document.getElementById('btn-add-library');
+  btn.disabled = true;
+  try {
+    const res = await fetch('/api/libraries', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, path }),
+    });
+    if (!res.ok) {
+      const d = await res.json().catch(() => ({}));
+      errEl.textContent = d.error || 'Failed';
+      errEl.hidden = false;
+      return;
+    }
+    const lib = await res.json();
+    document.getElementById('lib-name').value = '';
+    document.getElementById('lib-path').value = '';
+    await loadLibraries();
+    // Auto-trigger scan after adding
+    fetch(`/api/libraries/${lib.id}/scan`, { method: 'POST' }).catch(() => {});
+  } finally {
+    btn.disabled = false;
+  }
+});
+
+// ── Users (admin only) ────────────────────────────────────────────────────────
+
+async function loadUsers() {
+  const list = document.getElementById('users-list');
+  let data;
+  try {
+    data = await fetch('/api/users').then(r => r.json());
+  } catch {
+    list.innerHTML = '<p style="color:var(--text-dim)">Failed to load users.</p>';
+    return;
+  }
+  renderUsers(data.items || []);
+}
+
+function renderUsers(users) {
+  const list = document.getElementById('users-list');
+  list.innerHTML = '';
+  for (const u of users) {
+    const isSelf = currentUser && u.id === currentUser.id;
+
+    // Main row
+    const row = document.createElement('div');
+    row.className = 'settings-row user-row';
+    row.innerHTML = `
+      <div class="user-info">
+        <span class="user-name">${esc(u.username)}</span>
+        ${u.is_admin ? '<span class="user-badge">Admin</span>' : ''}
+        ${isSelf ? '<span class="user-badge user-badge-you">You</span>' : ''}
+      </div>
+      <div class="user-actions">
+        ${!isSelf ? `
+          <button class="user-pwd-btn" data-id="${u.id}">Change password</button>
+          <button class="user-admin-toggle" data-id="${u.id}" data-admin="${u.is_admin}">
+            ${u.is_admin ? 'Remove admin' : 'Make admin'}
+          </button>
+          <button class="user-del-btn" data-id="${u.id}">Delete</button>
+        ` : ''}
+      </div>`;
+    list.appendChild(row);
+
+    // Inline password row (hidden initially)
+    const pwdRow = document.createElement('div');
+    pwdRow.className = 'user-pwd-row';
+    pwdRow.hidden = true;
+    pwdRow.innerHTML = `
+      <input type="password" class="user-input user-pwd-input" placeholder="New password">
+      <button class="user-pwd-save" data-id="${u.id}">Save</button>
+      <button class="user-pwd-cancel">Cancel</button>
+      <span class="user-pwd-err" style="color:#e07070;font-size:.8rem"></span>`;
+    list.appendChild(pwdRow);
+
+    // Toggle password row
+    const pwdBtn = row.querySelector('.user-pwd-btn');
+    if (pwdBtn) {
+      pwdBtn.addEventListener('click', () => {
+        pwdRow.hidden = !pwdRow.hidden;
+        if (!pwdRow.hidden) pwdRow.querySelector('input').focus();
+      });
+      pwdRow.querySelector('.user-pwd-cancel').addEventListener('click', () => {
+        pwdRow.hidden = true;
+        pwdRow.querySelector('input').value = '';
+        pwdRow.querySelector('.user-pwd-err').textContent = '';
+      });
+      pwdRow.querySelector('.user-pwd-save').addEventListener('click', async (e) => {
+        const id = e.target.dataset.id;
+        const pwd = pwdRow.querySelector('input').value;
+        const errEl = pwdRow.querySelector('.user-pwd-err');
+        errEl.textContent = '';
+        if (!pwd) { errEl.textContent = 'Enter a password'; return; }
+        const res = await fetch(`/api/users/${id}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ password: pwd }),
+        });
+        if (res.ok) {
+          pwdRow.hidden = true;
+          pwdRow.querySelector('input').value = '';
+        } else {
+          errEl.textContent = 'Failed';
+        }
+      });
+    }
+
+    // Toggle admin
+    const adminBtn = row.querySelector('.user-admin-toggle');
+    if (adminBtn) {
+      adminBtn.addEventListener('click', async () => {
+        const id = adminBtn.dataset.id;
+        const makeAdmin = adminBtn.dataset.admin === 'false';
+        adminBtn.disabled = true;
+        const res = await fetch(`/api/users/${id}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ is_admin: makeAdmin }),
+        });
+        if (res.ok) loadUsers();
+        else adminBtn.disabled = false;
+      });
+    }
+
+    // Delete
+    const delBtn = row.querySelector('.user-del-btn');
+    if (delBtn) {
+      delBtn.addEventListener('click', async () => {
+        if (!confirm(`Delete user "${u.username}"?`)) return;
+        delBtn.disabled = true;
+        const res = await fetch(`/api/users/${u.id}`, { method: 'DELETE' });
+        if (res.ok) loadUsers();
+        else delBtn.disabled = false;
+      });
+    }
+  }
+}
+
+document.getElementById('btn-create-user').addEventListener('click', async () => {
+  const errEl = document.getElementById('create-user-error');
+  errEl.hidden = true;
+  const username = document.getElementById('new-username').value.trim();
+  const password = document.getElementById('new-password').value;
+  const isAdmin  = document.getElementById('new-is-admin').checked;
+  if (!username || !password) {
+    errEl.textContent = 'Username and password required';
+    errEl.hidden = false;
+    return;
+  }
+  const res = await fetch('/api/users', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ username, password, is_admin: isAdmin }),
+  });
+  if (!res.ok) {
+    const d = await res.json().catch(() => ({}));
+    errEl.textContent = d.error || 'Failed';
+    errEl.hidden = false;
+    return;
+  }
+  document.getElementById('new-username').value = '';
+  document.getElementById('new-password').value = '';
+  document.getElementById('new-is-admin').checked = false;
+  loadUsers();
+});
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+function esc(s) {
+  return String(s)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}

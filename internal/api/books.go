@@ -30,6 +30,7 @@ type bookDTO struct {
 	FileSize         int64    `json:"file_size"`
 	CreatedAt        string   `json:"created_at"`
 	UpdatedAt        string   `json:"updated_at"`
+	ProgressPct      float64  `json:"progress_pct"`
 }
 
 func toBookDTO(b db.Book) bookDTO {
@@ -84,9 +85,21 @@ func (s *Server) listBooks(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Batch-fetch reading progress for current user
+	var progressMap map[[16]byte]float64
+	if user, ok := userFromCtx(r); ok && len(result.Items) > 0 {
+		ids := make([][16]byte, len(result.Items))
+		for i, b := range result.Items {
+			ids[i] = b.ID
+		}
+		progressMap, _ = db.GetProgressBatch(r.Context(), s.db, user.ID, ids)
+	}
+
 	dtos := make([]bookDTO, len(result.Items))
 	for i, b := range result.Items {
-		dtos[i] = toBookDTO(b)
+		d := toBookDTO(b)
+		d.ProgressPct = progressMap[b.ID]
+		dtos[i] = d
 	}
 	respond(w, map[string]any{
 		"items": dtos,
@@ -191,6 +204,18 @@ func (s *Server) listSeries(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	respond(w, map[string]any{"items": dtos})
+}
+
+func (s *Server) listTags(w http.ResponseWriter, r *http.Request) {
+	tags, err := db.ListTags(r.Context(), s.db)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if tags == nil {
+		tags = []string{}
+	}
+	respond(w, map[string]any{"items": tags})
 }
 
 func (s *Server) getSeriesBooks(w http.ResponseWriter, r *http.Request) {

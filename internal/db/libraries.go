@@ -58,3 +58,15 @@ func DeleteLibrary(ctx context.Context, pool *pgxpool.Pool, id [16]byte) error {
 	_, err := pool.Exec(ctx, `DELETE FROM libraries WHERE id = $1`, id)
 	return err
 }
+
+// EnsureDefaultLibrary creates the default library if none exist.
+func EnsureDefaultLibrary(ctx context.Context, pool *pgxpool.Pool, name, path string) (Library, error) {
+	var count int
+	if err := pool.QueryRow(ctx, `SELECT COUNT(*) FROM libraries`).Scan(&count); err != nil {
+		return Library{}, err
+	}
+	if count > 0 {
+		return Library{}, nil
+	}
+	return CreateLibrary(ctx, pool, name, path)
+}

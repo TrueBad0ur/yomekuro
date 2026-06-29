@@ -6,6 +6,24 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
+// ListTags returns all tag names ordered alphabetically.
+func ListTags(ctx context.Context, pool *pgxpool.Pool) ([]string, error) {
+	rows, err := pool.Query(ctx, `SELECT name FROM tags ORDER BY name`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var tags []string
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return nil, err
+		}
+		tags = append(tags, name)
+	}
+	return tags, rows.Err()
+}
+
 // SetBookTags replaces all tags for a book with the given names.
 // Tags are created if they don't exist. Passing an empty slice clears all tags.
 func SetBookTags(ctx context.Context, pool *pgxpool.Pool, bookID [16]byte, names []string) error {

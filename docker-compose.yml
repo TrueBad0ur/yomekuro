@@ -21,7 +21,8 @@ services:
       YOMEKURO_DB: "postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}?sslmode=disable"
       YOMEKURO_DATA: /data
       YOMEKURO_ADDR: ":8080"
-      YOMEKURO_API_KEY: ${YOMEKURO_API_KEY}
+      YOMEKURO_ADMIN_USER: ${YOMEKURO_ADMIN_USER:-admin}
+      YOMEKURO_ADMIN_PASSWORD: ${YOMEKURO_ADMIN_PASSWORD}
     volumes:
       - ./library:/library:ro
       - ./data/app:/data
