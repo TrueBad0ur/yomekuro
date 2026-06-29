@@ -1,0 +1,29 @@
+services:
+  db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      - ./data/postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER}"]
+      interval: 5s
+      retries: 5
+
+  yomekuro:
+    build: .
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      YOMEKURO_DB: "postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}?sslmode=disable"
+      YOMEKURO_DATA: /data
+      YOMEKURO_ADDR: ":8080"
+      YOMEKURO_API_KEY: ${YOMEKURO_API_KEY}
+    volumes:
+      - ./library:/library:ro
+      - ./data/app:/data
+    ports:
+      - "8080:8080"

@@ -1,0 +1,159 @@
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --bg: #111;
+  --surface: #1c1c1c;
+  --text: #ddd;
+  --text-dim: #777;
+  --accent: #9b8ee0;
+  --border: #2e2e2e;
+}
+
+html { background: var(--bg); color: var(--text); font-family: system-ui, sans-serif; }
+a { color: var(--accent); text-decoration: none; }
+a:hover { text-decoration: underline; }
+button {
+  padding: 0.35rem 0.9rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text);
+  cursor: pointer;
+  font-size: 0.85rem;
+}
+button:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+button:disabled { opacity: 0.3; cursor: default; }
+
+/* ── Library page ─────────────────────────────────────────────────────────── */
+
+.app-header {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: 0.7rem 1.5rem;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  position: sticky;
+  top: 0;
+  z-index: 100;
+}
+.logo { font-size: 1.3rem; font-weight: 700; color: var(--accent); white-space: nowrap; }
+.search-form { flex: 1; max-width: 360px; }
+.search-form input {
+  width: 100%;
+  padding: 0.4rem 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 0.9rem;
+  outline: none;
+}
+.search-form input:focus { border-color: var(--accent); }
+
+.books-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(148px, 1fr));
+  gap: 1.25rem;
+  padding: 1.5rem;
+}
+.book-card {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--surface);
+  transition: border-color 0.15s, transform 0.1s;
+}
+.book-card:hover { border-color: var(--accent); transform: translateY(-2px); }
+.book-card a { display: block; color: inherit; }
+.book-card img {
+  width: 100%;
+  aspect-ratio: 2/3;
+  object-fit: cover;
+  display: block;
+  background: #222;
+}
+.book-info { padding: 0.6rem 0.7rem; }
+.book-title {
+  font-size: 0.82rem;
+  font-weight: 600;
+  line-height: 1.35;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.book-author { font-size: 0.72rem; color: var(--text-dim); margin-top: 0.2rem; }
+.book-series { font-size: 0.7rem; color: var(--accent); margin-top: 0.15rem; }
+
+.empty-msg { padding: 4rem; text-align: center; color: var(--text-dim); font-size: 0.95rem; }
+
+/* ── Reader page ──────────────────────────────────────────────────────────── */
+
+body.page-reader { display: flex; flex-direction: column; min-height: 100vh; }
+
+/* Protect chrome elements from epub CSS (writing-mode, etc.) */
+.app-chrome,
+.app-chrome * {
+  writing-mode: horizontal-tb !important;
+  text-orientation: mixed !important;
+  direction: ltr !important;
+  font-family: system-ui, sans-serif !important;
+}
+
+.reader-nav {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.5rem 1rem;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  position: sticky;
+  top: 0;
+  z-index: 200;
+}
+.nav-home { flex-shrink: 0; font-size: 0.85rem; }
+.nav-title {
+  flex: 1;
+  font-size: 0.88rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.nav-info { flex-shrink: 0; font-size: 0.8rem; color: var(--text-dim); }
+.nav-buttons { display: flex; gap: 0.4rem; flex-shrink: 0; }
+
+/* Content area — epub CSS handles writing-mode via class transfer */
+#reader-content {
+  flex: 1;
+}
+
+/* Horizontal chapters: normal vertical scroll with margin */
+#reader-content.hltr,
+#reader-content.h-ltr {
+  max-width: 780px;
+  margin: 0 auto;
+  padding: 2rem 1.5rem;
+  line-height: 1.85;
+}
+
+/* Vertical text chapters: column layout, horizontal scroll */
+#reader-content.vrtl,
+#reader-content.v-rtl {
+  height: calc(100vh - 44px);
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 1.5rem 2rem;
+}
+
+.reader-bottom-nav {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.6rem 1rem;
+  background: var(--surface);
+  border-top: 1px solid var(--border);
+}
+.reader-bottom-nav span { font-size: 0.8rem; color: var(--text-dim); }
+
+#loading { padding: 4rem; text-align: center; color: var(--text-dim); }

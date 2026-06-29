@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>yomekuro</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body class="page-reader">
+  <nav class="reader-nav app-chrome">
+    <a class="nav-home" href="/">← Library</a>
+    <span class="nav-title" id="nav-title"></span>
+    <span class="nav-info" id="nav-info"></span>
+    <div class="nav-buttons">
+      <button id="btn-prev" disabled>◀</button>
+      <button id="btn-next" disabled>▶</button>
+    </div>
+  </nav>
+
+  <div id="reader-content"><p id="loading">Loading…</p></div>
+
+  <nav class="reader-bottom-nav app-chrome">
+    <button id="btn-prev-b" disabled>◀ Prev</button>
+    <span id="bottom-info"></span>
+    <button id="btn-next-b" disabled>Next ▶</button>
+  </nav>
+
+  <script src="/reader.js"></script>
+</body>
+</html>

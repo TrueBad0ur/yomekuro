@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>yomekuro</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <header class="app-header">
+    <span class="logo">よめくろ</span>
+    <form class="search-form" id="search-form" onsubmit="return false">
+      <input type="search" id="search-input" placeholder="Search titles or authors…" autocomplete="off">
+    </form>
+  </header>
+  <main>
+    <div id="books-grid" class="books-grid"></div>
+    <p id="empty-msg" class="empty-msg" hidden>
+      No books found. Add a library via API and trigger a scan.
+    </p>
+  </main>
+  <script src="/app.js"></script>
+</body>
+</html>
