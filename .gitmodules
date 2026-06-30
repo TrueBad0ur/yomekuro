@@ -1,0 +1,3 @@
+[submodule "converter/mokuro"]
+	path = converter/mokuro
+	url = https://github.com/kha-white/mokuro

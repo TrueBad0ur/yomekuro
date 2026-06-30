@@ -111,18 +111,18 @@ func Open(filePath, libraryPath string) (*Book, error) {
 	}, nil
 }
 
-// OpenManifest returns spine, reading direction, and TOC without extracting
-// covers or full metadata. Used by the reader API to avoid redundant work.
-func OpenManifest(filePath string) ([]SpineItem, string, []TocEntry, error) {
+// OpenManifest returns spine, reading direction, fixed-layout flag, and TOC
+// without extracting covers or full metadata.
+func OpenManifest(filePath string) ([]SpineItem, string, bool, []TocEntry, error) {
 	zr, err := zip.OpenReader(filePath)
 	if err != nil {
-		return nil, "", nil, err
+		return nil, "", false, nil, err
 	}
 	defer zr.Close()
 
 	opfPath, err := findOPFPath(&zr.Reader)
 	if err != nil {
-		return nil, "", nil, err
+		return nil, "", false, nil, err
 	}
 	opfDir := ""
 	if idx := strings.LastIndex(opfPath, "/"); idx >= 0 {
@@ -130,13 +130,15 @@ func OpenManifest(filePath string) ([]SpineItem, string, []TocEntry, error) {
 	}
 	doc, err := parseOPFDoc(&zr.Reader, opfPath)
 	if err != nil {
-		return nil, "", nil, err
+		return nil, "", false, nil, err
 	}
 	manifest := buildManifest(doc, opfDir)
 	spine, direction := buildSpine(doc, manifest)
+	fixedLayout := detectFixedLayout(doc)
 	toc := GetTOC(&zr.Reader, manifest)
-	return spine, direction, toc, nil
+	return spine, direction, fixedLayout, toc, nil
 }
+
 
 // ReadZipEntry opens the epub at filePath and reads a single named entry.
 // Used for one-off reads; for serving many entries use an open *zip.ReadCloser.

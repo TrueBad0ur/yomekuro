@@ -1,6 +1,20 @@
+# secrets / local config
 .env
+
+# built binaries
 yomekuro
+converter/converter
+
+# runtime data
 data/
-CLAUDE.md
 library/
+
+# epub files (large media)
 **/*.epub
+
+# macOS
+.DS_Store
+**/.DS_Store
+
+# project-internal docs
+CLAUDE.md

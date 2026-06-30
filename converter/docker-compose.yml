@@ -1,0 +1,8 @@
+services:
+  converter:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    volumes:
+      - ../library:/library
+      - ./data/hf-cache:/root/.cache/huggingface

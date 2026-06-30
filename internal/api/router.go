@@ -61,6 +61,8 @@ func NewRouter(pool *pgxpool.Pool, sc *scanner.Scanner, w *scanner.Watcher, data
 		r.Get("/api/series/{name}/books", s.getSeriesBooks)
 
 		r.Get("/api/tags", s.listTags)
+		r.Get("/api/books/{id}/tags", s.getBookTags)
+		r.Put("/api/books/{id}/tags", s.setBookTags)
 
 		r.Get("/api/books/{id}/progress", s.getProgress)
 		r.Put("/api/books/{id}/progress", s.putProgress)

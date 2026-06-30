@@ -293,6 +293,87 @@ body.page-library { display: flex; min-height: 100vh; }
   display: block;
   background: var(--border);
 }
+.book-card { position: relative; }
+.book-card-link { display: block; text-decoration: none; }
+.book-card-link:hover { text-decoration: none; }
+
+.book-tag-btn {
+  position: absolute;
+  top: 0.3rem;
+  right: 0.3rem;
+  width: 1.6rem;
+  height: 1.6rem;
+  padding: 0;
+  font-size: 1rem;
+  line-height: 1;
+  background: rgba(0,0,0,.45);
+  color: #fff;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.15s;
+  z-index: 2;
+}
+.book-card:hover .book-tag-btn { opacity: 1; }
+
+.tag-editor-popup {
+  position: fixed;
+  z-index: 500;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.75rem;
+  width: 220px;
+  box-shadow: 0 6px 20px rgba(0,0,0,.35);
+}
+.tag-editor-title {
+  font-size: 0.78rem;
+  color: var(--text-dim);
+  margin-bottom: 0.5rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.tag-editor-list { display: flex; flex-wrap: wrap; gap: 0.3rem; margin-bottom: 0.55rem; min-height: 1.2rem; }
+.tag-editor-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.2rem;
+  background: color-mix(in srgb, var(--accent) 15%, transparent);
+  color: var(--accent);
+  border-radius: 99px;
+  padding: 0.15rem 0.5rem;
+  font-size: 0.75rem;
+}
+.tag-rm {
+  background: none;
+  border: none;
+  color: inherit;
+  cursor: pointer;
+  padding: 0;
+  font-size: 0.9rem;
+  line-height: 1;
+  opacity: 0.7;
+}
+.tag-rm:hover { opacity: 1; }
+.tag-editor-add { display: flex; gap: 0.4rem; }
+.tag-editor-input {
+  flex: 1;
+  padding: 0.3rem 0.5rem;
+  font-size: 0.8rem;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text);
+  min-width: 0;
+}
+.tag-editor-save {
+  padding: 0.3rem 0.6rem;
+  font-size: 0.8rem;
+  flex-shrink: 0;
+}
+
 .book-info { padding: 0.6rem 0.7rem; }
 .book-title {
   font-size: 0.82rem;
@@ -340,8 +421,17 @@ body.page-reader { display: flex; flex-direction: column; min-height: 100vh; }
 .nav-info { flex-shrink: 0; font-size: 0.8rem; color: var(--text-dim); }
 .nav-buttons { display: flex; gap: 0.4rem; flex-shrink: 0; }
 .nav-buttons button { padding: 0.35rem 0.9rem; }
+.nav-buttons button.active { background: var(--accent); color: #fff; border-color: var(--accent); }
 
 #reader-content { flex: 1; }
+
+/* Fixed-layout (manga) mode */
+body.fixed-layout-mode {
+  overflow: hidden;
+}
+body.fixed-layout-mode .reader-bottom-nav {
+  display: none;
+}
 
 #reader-content.hltr,
 #reader-content.h-ltr {

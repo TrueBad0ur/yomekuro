@@ -114,6 +114,7 @@ func (c *zipCache) closeAll() {
 type manifestResponse struct {
 	Title            string         `json:"title"`
 	ReadingDirection string         `json:"reading_direction"`
+	FixedLayout      bool           `json:"fixed_layout"`
 	Spine            []spineItemDTO `json:"spine"`
 	TOC              []tocEntryDTO  `json:"toc"`
 }
@@ -138,7 +139,7 @@ func (s *Server) getBookManifest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	spine, _, toc, err := epub.OpenManifest(b.Path)
+	spine, _, fixedLayout, toc, err := epub.OpenManifest(b.Path)
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, "could not open epub")
 		return
@@ -151,6 +152,7 @@ func (s *Server) getBookManifest(w http.ResponseWriter, r *http.Request) {
 	respond(w, manifestResponse{
 		Title:            b.Title,
 		ReadingDirection: b.ReadingDirection,
+		FixedLayout:      fixedLayout,
 		Spine:            spineDTO,
 		TOC:              enrichTOC(toc, spine),
 	})

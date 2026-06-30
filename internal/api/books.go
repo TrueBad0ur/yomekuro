@@ -1,6 +1,7 @@
 package api
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"os"
@@ -204,6 +205,44 @@ func (s *Server) listSeries(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	respond(w, map[string]any{"items": dtos})
+}
+
+func (s *Server) getBookTags(w http.ResponseWriter, r *http.Request) {
+	id, ok := parseID(w, chi.URLParam(r, "id"))
+	if !ok {
+		return
+	}
+	tags, err := db.GetBookTags(r.Context(), s.db, id)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if tags == nil {
+		tags = []string{}
+	}
+	respond(w, map[string]any{"items": tags})
+}
+
+func (s *Server) setBookTags(w http.ResponseWriter, r *http.Request) {
+	id, ok := parseID(w, chi.URLParam(r, "id"))
+	if !ok {
+		return
+	}
+	var req struct {
+		Tags []string `json:"tags"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		respondError(w, http.StatusBadRequest, "invalid JSON")
+		return
+	}
+	if req.Tags == nil {
+		req.Tags = []string{}
+	}
+	if err := db.SetBookTags(r.Context(), s.db, id, req.Tags); err != nil {
+		respondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (s *Server) listTags(w http.ResponseWriter, r *http.Request) {

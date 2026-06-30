@@ -86,6 +86,17 @@ func buildManifest(doc *etree.Document, opfDir string) map[string]ManifestItem {
 	return manifest
 }
 
+// detectFixedLayout returns true if the OPF declares pre-paginated layout.
+func detectFixedLayout(doc *etree.Document) bool {
+	for _, meta := range doc.FindElements("//metadata/meta") {
+		if attrVal(meta, "property") == "rendition:layout" &&
+			strings.TrimSpace(meta.Text()) == "pre-paginated" {
+			return true
+		}
+	}
+	return false
+}
+
 // buildSpine returns ordered spine items and page-progression-direction.
 func buildSpine(doc *etree.Document, manifest map[string]ManifestItem) ([]SpineItem, string) {
 	direction := ""

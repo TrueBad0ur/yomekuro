@@ -168,7 +168,7 @@ function renderBookGrid(books) {
         <div class="book-progress-pct">${Math.round(pct*100)}%</div>
       </div>` : '';
     card.innerHTML = `
-      <a href="/reader?id=${b.id}">
+      <a class="book-card-link" href="/reader?id=${b.id}">
         <img src="/api/books/${b.id}/cover" alt="${esc(b.title)}" loading="lazy"
              onerror="this.style.display='none'">
         <div class="book-info">
@@ -176,7 +176,12 @@ function renderBookGrid(books) {
           ${(b.authors||[]).length ? `<div class="book-author">${esc(b.authors.join(', '))}</div>` : ''}
         </div>
         ${progressHTML}
-      </a>`;
+      </a>
+      <button class="book-tag-btn" data-id="${b.id}" title="Edit genres">⋯</button>`;
+    card.querySelector('.book-tag-btn').addEventListener('click', (e) => {
+      e.stopPropagation();
+      openTagEditor(b.id, b.title, e.currentTarget);
+    });
     grid.appendChild(card);
   }
 }
@@ -218,6 +223,90 @@ function renderTagChips() {
     });
     tagChips.appendChild(btn);
   }
+}
+
+// ── Tag editor popup ──────────────────────────────────────────────────────────
+
+let tagEditorPopup = null;
+
+function closeTagEditor() {
+  if (tagEditorPopup) { tagEditorPopup.remove(); tagEditorPopup = null; }
+}
+
+document.addEventListener('click', (e) => {
+  if (tagEditorPopup && !tagEditorPopup.contains(e.target)) closeTagEditor();
+});
+
+async function openTagEditor(bookId, bookTitle, anchorEl) {
+  closeTagEditor();
+
+  const data = await fetch(`/api/books/${bookId}/tags`).then(r => r.json()).catch(() => ({ items: [] }));
+  let tags = data.items || [];
+
+  const popup = document.createElement('div');
+  popup.className = 'tag-editor-popup';
+  popup.addEventListener('click', e => e.stopPropagation());
+  tagEditorPopup = popup;
+
+  function render() {
+    popup.innerHTML = `
+      <div class="tag-editor-title">${esc(bookTitle)}</div>
+      <div class="tag-editor-list">${tags.length
+        ? tags.map(t => `<span class="tag-editor-chip">${esc(t)}<button class="tag-rm" data-tag="${esc(t)}">×</button></span>`).join('')
+        : '<span style="color:var(--text-dim);font-size:.8rem">No genres yet</span>'
+      }</div>
+      <div class="tag-editor-add">
+        <input class="tag-editor-input" placeholder="Add genre…" list="tag-suggestions">
+        <datalist id="tag-suggestions">${(window._allTags||[]).map(t => `<option value="${esc(t)}">`).join('')}</datalist>
+        <button class="tag-editor-save">Add</button>
+      </div>`;
+
+    popup.querySelectorAll('.tag-rm').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        tags = tags.filter(t => t !== btn.dataset.tag);
+        await saveTags();
+      });
+    });
+
+    popup.querySelector('.tag-editor-save').addEventListener('click', async () => {
+      const input = popup.querySelector('.tag-editor-input');
+      const val = input.value.trim();
+      if (!val || tags.includes(val)) { input.value = ''; return; }
+      tags = [...tags, val];
+      input.value = '';
+      await saveTags();
+    });
+
+    popup.querySelector('.tag-editor-input').addEventListener('keydown', async (e) => {
+      if (e.key !== 'Enter') return;
+      const val = e.target.value.trim();
+      if (!val || tags.includes(val)) { e.target.value = ''; return; }
+      tags = [...tags, val];
+      e.target.value = '';
+      await saveTags();
+    });
+  }
+
+  async function saveTags() {
+    await fetch(`/api/books/${bookId}/tags`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ tags }),
+    });
+    render();
+    loadTags(); // refresh tag chips in sidebar
+  }
+
+  render();
+
+  // Position popup near the anchor button
+  document.body.appendChild(popup);
+  const rect = anchorEl.getBoundingClientRect();
+  const pw = popup.offsetWidth;
+  let left = rect.right - pw;
+  if (left < 4) left = 4;
+  popup.style.left = left + 'px';
+  popup.style.top  = (rect.bottom + 6) + 'px';
 }
 
 // ── Series sidebar + load ──────────────────────────────────────────────────────
