@@ -17,4 +17,5 @@ library/
 **/.DS_Store
 
 # project-internal docs
+debug/
 CLAUDE.md

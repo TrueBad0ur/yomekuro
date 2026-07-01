@@ -2,7 +2,7 @@ services:
   converter:
     build:
       context: .
-      dockerfile: Dockerfile
+      dockerfile: Dockerfile.cpu
     volumes:
       - ../library:/library
       - ./data/hf-cache:/root/.cache/huggingface

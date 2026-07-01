@@ -261,7 +261,8 @@ async function loadChapter(index, restoreScroll) {
   const item = manifest.spine[index];
   let text;
   try {
-    const res = await fetch(`/api/books/${bookId}/content/${item.href}`);
+    // no-store: content changes when a book is re-converted; never serve a stale page from HTTP cache
+    const res = await fetch(`/api/books/${bookId}/content/${item.href}`, { cache: 'no-store' });
     text = await res.text();
   } catch {
     content.innerHTML = '<p style="padding:2rem;color:#888">Failed to load chapter.</p>';
@@ -294,7 +295,7 @@ async function loadChapter(index, restoreScroll) {
     if (spreadMode && spineIndex + 1 < manifest.spine.length) {
       const item2 = manifest.spine[spineIndex + 1];
       try {
-        const res2 = await fetch(`/api/books/${bookId}/content/${item2.href}`);
+        const res2 = await fetch(`/api/books/${bookId}/content/${item2.href}`, { cache: 'no-store' });
         const text2 = await res2.text();
         const parser2 = new DOMParser();
         let doc2 = parser2.parseFromString(text2, 'application/xhtml+xml');

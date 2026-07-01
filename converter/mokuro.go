@@ -25,10 +25,11 @@ type MokuroPage struct {
 }
 
 type MokuroBlock struct {
-	Box      [4]int   `json:"box"`    // [x1, y1, x2, y2]
-	Vertical bool     `json:"vertical"`
-	FontSize float64  `json:"font_size"`
-	Lines    []string `json:"lines"`
+	Box         [4]int        `json:"box"`         // [x1, y1, x2, y2] — bounding box of all lines
+	Vertical    bool          `json:"vertical"`
+	FontSize    float64       `json:"font_size"`
+	LinesCoords [][][]float64 `json:"lines_coords"` // per-line quadrilateral: [line][point][x,y]
+	Lines       []string      `json:"lines"`        // one entry per line/column, index-aligned with LinesCoords
 }
 
 func runMokuro(inputDir string, volumeDirs []string, noCache bool) error {

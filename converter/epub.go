@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 type imgEntry struct {
@@ -225,34 +226,103 @@ func pageXHTML(num int, page MokuroPage, imgHref string) string {
 `, w, h, num, pageStyle, imgHref, num, imgStyle))
 
 	for _, blk := range page.Blocks {
-		text := strings.TrimSpace(strings.Join(blk.Lines, ""))
-		if text == "" {
-			continue // skip empty OCR results
-		}
-		x1, y1, x2, y2 := blk.Box[0], blk.Box[1], blk.Box[2], blk.Box[3]
-		bw, bh := x2-x1, y2-y1
-		if bw <= 0 || bh <= 0 {
+		// Preferred path: render each line at its own coordinates so transparent
+		// glyphs land exactly on the image characters (correct Yomitan hit-testing).
+		if len(blk.LinesCoords) == len(blk.Lines) && len(blk.Lines) > 0 {
+			for li, line := range blk.Lines {
+				writeLineDiv(&b, line, blk.LinesCoords[li], blk.Vertical)
+			}
 			continue
 		}
-		fs := blk.FontSize
-		if fs <= 0 {
-			fs = 16
-		}
-		style := fmt.Sprintf(
-			"position:absolute;left:%dpx;top:%dpx;width:%dpx;height:%dpx;font-size:%.1fpx;color:transparent;cursor:text;-webkit-user-select:text;user-select:text;line-height:1;",
-			x1, y1, bw, bh, fs,
-		)
-		if blk.Vertical {
-			style += "writing-mode:vertical-rl;"
-		}
-		b.WriteString(fmt.Sprintf(`    <div style="%s">%s</div>
-`, style, xmlEsc(text)))
+		// Fallback (no per-line coords): position joined text in the block box.
+		writeBlockDiv(&b, strings.Join(blk.Lines, ""), blk.Box, blk.FontSize, blk.Vertical)
 	}
 
 	b.WriteString(`  </div>
 </body>
 </html>`)
 	return b.String()
+}
+
+// writeLineDiv renders one OCR line as a transparent, positioned <div>.
+// font-size is derived from the line's own bounding box so N characters fill the
+// reading axis exactly; white-space:nowrap prevents CSS from re-wrapping columns.
+func writeLineDiv(b *strings.Builder, text string, coords [][]float64, vertical bool) {
+	text = strings.TrimSpace(text)
+	n := utf8.RuneCountInString(text)
+	if n == 0 || len(coords) == 0 {
+		return
+	}
+
+	minX, minY := coords[0][0], coords[0][1]
+	maxX, maxY := minX, minY
+	for _, pt := range coords {
+		if len(pt) < 2 {
+			continue
+		}
+		minX, minY = min(minX, pt[0]), min(minY, pt[1])
+		maxX, maxY = max(maxX, pt[0]), max(maxY, pt[1])
+	}
+	lw, lh := maxX-minX, maxY-minY
+	if lw <= 0 || lh <= 0 {
+		return
+	}
+
+	// Distribute characters along the reading axis (vertical: height, horizontal: width).
+	var fs float64
+	if vertical {
+		fs = lh / float64(n)
+	} else {
+		fs = lw / float64(n)
+	}
+	if fs <= 0 {
+		fs = 16
+	}
+
+	// No width/height: a fixed cross-axis size is what lets the browser wrap the
+	// column/row when sub-pixel rounding makes content 1px too big. With the size
+	// left to auto + white-space:nowrap, the text box hugs its single line and can
+	// never break into a second column. Position comes from left/top; font-size
+	// (= axis length / char count) reproduces the original extent.
+	style := fmt.Sprintf(
+		"position:absolute;left:%dpx;top:%dpx;font-size:%.1fpx;line-height:1;white-space:nowrap;color:transparent;cursor:text;-webkit-user-select:text;user-select:text;",
+		iround(minX), iround(minY), fs,
+	)
+	if vertical {
+		style += "writing-mode:vertical-rl;"
+	}
+	fmt.Fprintf(b, "    <div style=\"%s\">%s</div>\n", style, xmlEsc(text))
+}
+
+// writeBlockDiv is the fallback for blocks lacking per-line coordinates.
+func writeBlockDiv(b *strings.Builder, text string, box [4]int, fontSize float64, vertical bool) {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return
+	}
+	bw, bh := box[2]-box[0], box[3]-box[1]
+	if bw <= 0 || bh <= 0 {
+		return
+	}
+	fs := fontSize
+	if fs <= 0 {
+		fs = 16
+	}
+	style := fmt.Sprintf(
+		"position:absolute;left:%dpx;top:%dpx;width:%dpx;height:%dpx;font-size:%.1fpx;line-height:1;color:transparent;cursor:text;-webkit-user-select:text;user-select:text;",
+		box[0], box[1], bw, bh, fs,
+	)
+	if vertical {
+		style += "writing-mode:vertical-rl;"
+	}
+	fmt.Fprintf(b, "    <div style=\"%s\">%s</div>\n", style, xmlEsc(text))
+}
+
+func iround(f float64) int {
+	if f < 0 {
+		return int(f - 0.5)
+	}
+	return int(f + 0.5)
 }
 
 func extMediaType(ext string) string {

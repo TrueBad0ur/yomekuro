@@ -57,6 +57,7 @@ type zipCache struct {
 
 type cacheEntry struct {
 	path string
+	hash string
 	rc   *zip.ReadCloser
 }
 
@@ -69,14 +70,24 @@ func newZipCache(capacity int) *zipCache {
 }
 
 // get returns a cached *zip.ReadCloser, opening it if necessary.
+// hash is the book's file_hash; a cached reader whose hash no longer matches
+// (the file was rewritten in place) is closed and reopened, so a re-scan/re-convert
+// takes effect without restarting the server.
 // The caller must NOT close the returned ReadCloser; the cache owns it.
-func (c *zipCache) get(path string) (*zip.ReadCloser, error) {
+func (c *zipCache) get(path, hash string) (*zip.ReadCloser, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
 	if el, ok := c.items[path]; ok {
-		c.order.MoveToFront(el)
-		return el.Value.(*cacheEntry).rc, nil
+		entry := el.Value.(*cacheEntry)
+		if entry.hash == hash {
+			c.order.MoveToFront(el)
+			return entry.rc, nil
+		}
+		// File changed on disk — drop the stale reader.
+		entry.rc.Close()
+		delete(c.items, path)
+		c.order.Remove(el)
 	}
 
 	rc, err := zip.OpenReader(path)
@@ -94,7 +105,7 @@ func (c *zipCache) get(path string) (*zip.ReadCloser, error) {
 		}
 	}
 
-	el := c.order.PushFront(&cacheEntry{path: path, rc: rc})
+	el := c.order.PushFront(&cacheEntry{path: path, hash: hash, rc: rc})
 	c.items[path] = el
 	return rc, nil
 }
@@ -189,7 +200,7 @@ func (s *Server) getBookContent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	zr, err := s.zips.get(b.Path)
+	zr, err := s.zips.get(b.Path, b.FileHash)
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, "could not open epub")
 		return
@@ -217,7 +228,9 @@ func (s *Server) getBookContent(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", mimeByExt(entryPath))
 	w.Header().Set("ETag", etag)
-	w.Header().Set("Cache-Control", "max-age=3600")
+	// no-cache = always revalidate via ETag. Content can change on re-convert;
+	// the hash-based ETag makes revalidation cheap (304) while never serving stale pages.
+	w.Header().Set("Cache-Control", "no-cache")
 	io.Copy(w, rc)
 }
 

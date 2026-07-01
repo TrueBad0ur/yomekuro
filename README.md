@@ -39,8 +39,11 @@ YOMEKURO_ADMIN_PASSWORD=change-me
 # yomekuro
 docker build -t yomekuro:latest .
 
-# converter
-docker build -t converter:latest converter/
+# converter — CPU-only (recommended, ~2.5GB)
+docker build -f converter/Dockerfile.cpu -t converter:cpuonly converter/
+
+# converter — GPU/CUDA (~9.5GB, for amd64 with NVIDIA GPU)
+docker build -f converter/Dockerfile.gpucpu -t converter:gpucpu converter/
 ```
 
 ### Multi-arch (amd64 + arm64), push to registry
@@ -49,11 +52,19 @@ docker build -t converter:latest converter/
 # create builder once
 docker buildx create --name multi --driver docker-container --use
 
+# yomekuro
 docker buildx build --platform linux/amd64,linux/arm64 \
   -t truebad0ur/yomekuro:0.2 --push .
 
+# converter — CPU-only
 docker buildx build --platform linux/amd64,linux/arm64 \
-  -t truebad0ur/converter:0.1 --push converter/
+  -f converter/Dockerfile.cpu \
+  -t truebad0ur/converter:cpuonly --push converter/
+
+# converter — GPU/CUDA (arm64 gets CPU automatically, no CUDA on arm64)
+docker buildx build --platform linux/amd64,linux/arm64 \
+  -f converter/Dockerfile.gpucpu \
+  -t truebad0ur/converter:gpucpu --push converter/
 ```
 
 ### Go binary directly
@@ -67,6 +78,15 @@ CGO_ENABLED=0 go build -o yomekuro ./cmd/yomekuro
 ## Converter (manga OCR → EPUB)
 
 Converts a folder of manga images into a fixed-layout EPUB with transparent OCR text overlay. Uses [mokuro](https://github.com/kha-white/mokuro) for Japanese text detection.
+
+### Docker images
+
+| Dockerfile | Tag | Size | When to use |
+|------------|-----|------|-------------|
+| `Dockerfile.cpu` | `cpuonly` | ~2.5GB | Home server, NAS, any machine without NVIDIA GPU |
+| `Dockerfile.gpucpu` | `gpucpu` | ~9.5GB | amd64 with NVIDIA GPU (faster OCR) |
+
+`docker-compose.yml` uses `Dockerfile.cpu` by default.
 
 ### Input layout
 
