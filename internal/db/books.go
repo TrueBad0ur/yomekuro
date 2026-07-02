@@ -33,6 +33,7 @@ type Book struct {
 	ReadingDirection string
 	CoverPath        string
 	CoverMediaType   string
+	Format           string
 	CreatedAt        time.Time
 	UpdatedAt        time.Time
 }
@@ -68,7 +69,7 @@ const selectBookCols = `
 	id, library_id, path, filename, file_size, file_hash,
 	title, sort_title, authors, language, publisher, published_at,
 	description, isbn, series_name, series_index, page_count,
-	reading_direction, cover_path, cover_media_type, created_at, updated_at`
+	reading_direction, cover_path, cover_media_type, format, created_at, updated_at`
 
 func scanBook(row pgx.Row) (Book, error) {
 	var b Book
@@ -77,7 +78,7 @@ func scanBook(row pgx.Row) (Book, error) {
 		&b.ID, &b.LibraryID, &b.Path, &b.Filename, &b.FileSize, &b.FileHash,
 		&b.Title, &b.SortTitle, &b.Authors, &b.Language, &b.Publisher, &pubAt,
 		&b.Description, &b.ISBN, &b.SeriesName, &b.SeriesIndex, &b.PageCount,
-		&b.ReadingDirection, &b.CoverPath, &b.CoverMediaType, &b.CreatedAt, &b.UpdatedAt,
+		&b.ReadingDirection, &b.CoverPath, &b.CoverMediaType, &b.Format, &b.CreatedAt, &b.UpdatedAt,
 	)
 	if err == nil && pubAt.Valid {
 		t := pubAt.Time
@@ -193,13 +194,13 @@ INSERT INTO books (
     file_size, file_hash, file_modified,
     title, sort_title, authors, language, publisher, published_at,
     description, isbn, series_name, series_index, page_count,
-    reading_direction, cover_path, cover_media_type
+    reading_direction, cover_path, cover_media_type, format
 ) VALUES (
     $1, $2, $3, $4,
     $5, $6, $7,
     $8, $9, $10, $11, $12, $13::date,
     $14, $15, $16, $17, $18,
-    $19, $20, $21
+    $19, $20, $21, $22
 )
 ON CONFLICT (path) DO UPDATE SET
     filename          = EXCLUDED.filename,
@@ -220,6 +221,7 @@ ON CONFLICT (path) DO UPDATE SET
     reading_direction = EXCLUDED.reading_direction,
     cover_path        = EXCLUDED.cover_path,
     cover_media_type  = EXCLUDED.cover_media_type,
+    format            = EXCLUDED.format,
     updated_at        = NOW()`
 
 func UpsertBook(ctx context.Context, pool *pgxpool.Pool, b Book) error {
@@ -228,7 +230,7 @@ func UpsertBook(ctx context.Context, pool *pgxpool.Pool, b Book) error {
 		b.FileSize, b.FileHash, b.FileModified,
 		b.Title, b.SortTitle, b.Authors, b.Language, b.Publisher, b.PublishedAt,
 		b.Description, b.ISBN, b.SeriesName, b.SeriesIndex, b.PageCount,
-		b.ReadingDirection, b.CoverPath, b.CoverMediaType,
+		b.ReadingDirection, b.CoverPath, b.CoverMediaType, b.Format,
 	)
 	return err
 }

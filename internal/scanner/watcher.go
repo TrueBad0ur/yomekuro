@@ -102,7 +102,8 @@ func (w *Watcher) handleEvent(ctx context.Context, event fsnotify.Event) {
 		}
 	}
 
-	if !strings.EqualFold(filepath.Ext(name), ".epub") {
+	ext := strings.ToLower(filepath.Ext(name))
+	if ext != ".epub" && ext != ".html" && ext != ".htm" {
 		return
 	}
 

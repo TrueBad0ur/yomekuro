@@ -2,12 +2,15 @@
 .env
 
 # built binaries
-yomekuro
+/yomekuro
 converter/converter
 
 # runtime data
 data/
-library/
+library/*
+!library/.gitkeep
+html-library/*
+!html-library/.gitkeep
 
 # epub files (large media)
 **/*.epub

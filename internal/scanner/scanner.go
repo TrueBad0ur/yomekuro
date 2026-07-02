@@ -14,6 +14,7 @@ import (
 
 	"github.com/truebad0ur/yomekuro/internal/db"
 	"github.com/truebad0ur/yomekuro/internal/epub"
+	"github.com/truebad0ur/yomekuro/internal/htmlbook"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -38,7 +39,7 @@ func (s *Scanner) ScanLibrary(ctx context.Context, lib db.Library) error {
 			slog.Warn("scan: walk error", "path", path, "err", err)
 			return nil
 		}
-		if d.IsDir() || !isEPUB(d.Name()) {
+		if d.IsDir() || !(isEPUB(d.Name()) || isHTML(d.Name())) {
 			return nil
 		}
 		found = append(found, path)
@@ -102,11 +103,6 @@ func (s *Scanner) processFile(ctx context.Context, lib db.Library, filePath stri
 	}
 
 	// Full parse needed.
-	book, err := epub.Open(filePath, lib.Path)
-	if err != nil {
-		return false, fmt.Errorf("parse epub: %w", err)
-	}
-
 	bookID := existing.ID
 	if !found {
 		bookID, err = db.NewUUID()
@@ -115,47 +111,81 @@ func (s *Scanner) processFile(ctx context.Context, lib db.Library, filePath stri
 		}
 	}
 
-	coverPath, coverMT := s.saveCover(bookID, book.CoverData, book.CoverMediaType)
+	var rec db.Book
+	var tags []string
 
-	var pubAt *time.Time
-	if book.PublishedAt != nil {
-		t := book.PublishedAt.UTC()
-		pubAt = &t
-	}
+	if isHTML(filePath) {
+		book, err := htmlbook.Open(filePath)
+		if err != nil {
+			return false, fmt.Errorf("parse html: %w", err)
+		}
+		rec = db.Book{
+			ID:               bookID,
+			LibraryID:        lib.ID,
+			Path:             filePath,
+			Filename:         filepath.Base(filePath),
+			FileSize:         fi.Size(),
+			FileHash:         hash,
+			FileModified:     mtime,
+			Title:            book.Title,
+			SortTitle:        book.SortTitle,
+			Authors:          book.Authors,
+			Language:         book.Language,
+			SeriesName:       strings.TrimSuffix(filepath.Base(filePath), filepath.Ext(filePath)),
+			PageCount:        1,
+			ReadingDirection: book.ReadingDirection,
+			Format:           "html",
+		}
+	} else {
+		book, err := epub.Open(filePath, lib.Path)
+		if err != nil {
+			return false, fmt.Errorf("parse epub: %w", err)
+		}
 
-	authorNames := make([]string, len(book.Authors))
-	for i, a := range book.Authors {
-		authorNames[i] = a.Name
-	}
+		coverPath, coverMT := s.saveCover(bookID, book.CoverData, book.CoverMediaType)
 
-	rec := db.Book{
-		ID:               bookID,
-		LibraryID:        lib.ID,
-		Path:             filePath,
-		Filename:         filepath.Base(filePath),
-		FileSize:         fi.Size(),
-		FileHash:         hash,
-		FileModified:     mtime,
-		Title:            book.Title,
-		SortTitle:        book.SortTitle,
-		Authors:          authorNames,
-		Language:         book.Language,
-		Publisher:        book.Publisher,
-		PublishedAt:      pubAt,
-		Description:      book.Description,
-		ISBN:             book.ISBN,
-		SeriesName:       book.SeriesName,
-		SeriesIndex:      book.SeriesIndex,
-		PageCount:        book.PageCount,
-		ReadingDirection: book.ReadingDirection,
-		CoverPath:        coverPath,
-		CoverMediaType:   coverMT,
+		var pubAt *time.Time
+		if book.PublishedAt != nil {
+			t := book.PublishedAt.UTC()
+			pubAt = &t
+		}
+
+		authorNames := make([]string, len(book.Authors))
+		for i, a := range book.Authors {
+			authorNames[i] = a.Name
+		}
+
+		rec = db.Book{
+			ID:               bookID,
+			LibraryID:        lib.ID,
+			Path:             filePath,
+			Filename:         filepath.Base(filePath),
+			FileSize:         fi.Size(),
+			FileHash:         hash,
+			FileModified:     mtime,
+			Title:            book.Title,
+			SortTitle:        book.SortTitle,
+			Authors:          authorNames,
+			Language:         book.Language,
+			Publisher:        book.Publisher,
+			PublishedAt:      pubAt,
+			Description:      book.Description,
+			ISBN:             book.ISBN,
+			SeriesName:       book.SeriesName,
+			SeriesIndex:      book.SeriesIndex,
+			PageCount:        book.PageCount,
+			ReadingDirection: book.ReadingDirection,
+			CoverPath:        coverPath,
+			CoverMediaType:   coverMT,
+			Format:           "epub",
+		}
+		tags = book.Tags
 	}
 
 	if err := db.UpsertBook(ctx, s.pool, rec); err != nil {
 		return false, fmt.Errorf("upsert book: %w", err)
 	}
-	if err := db.SetBookTags(ctx, s.pool, bookID, book.Tags); err != nil {
+	if err := db.SetBookTags(ctx, s.pool, bookID, tags); err != nil {
 		slog.Warn("set tags", "path", filePath, "err", err)
 	}
 
@@ -177,6 +207,11 @@ func (s *Scanner) saveCover(bookID [16]byte, data []byte, mediaType string) (str
 
 func isEPUB(name string) bool {
 	return strings.EqualFold(filepath.Ext(name), ".epub")
+}
+
+func isHTML(name string) bool {
+	ext := strings.ToLower(filepath.Ext(name))
+	return ext == ".html" || ext == ".htm"
 }
 
 func hashFile(path string) (string, error) {

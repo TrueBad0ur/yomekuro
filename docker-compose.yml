@@ -25,6 +25,7 @@ services:
       YOMEKURO_ADMIN_PASSWORD: ${YOMEKURO_ADMIN_PASSWORD}
     volumes:
       - ./library:/library:ro
+      - ./html-library:/html-library:ro
       - ./data/app:/data
     ports:
-      - "8080:8080"
+      - "8099:8080"

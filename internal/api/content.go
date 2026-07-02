@@ -150,6 +150,17 @@ func (s *Server) getBookManifest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if b.Format == "html" {
+		respond(w, manifestResponse{
+			Title:            b.Title,
+			ReadingDirection: b.ReadingDirection,
+			FixedLayout:      false,
+			Spine:            []spineItemDTO{{Href: b.Filename, MediaType: "text/html; charset=utf-8"}},
+			TOC:              []tocEntryDTO{},
+		})
+		return
+	}
+
 	spine, _, fixedLayout, toc, err := epub.OpenManifest(b.Path)
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, "could not open epub")
@@ -197,6 +208,14 @@ func (s *Server) getBookContent(w http.ResponseWriter, r *http.Request) {
 	etag := fmt.Sprintf(`"%s-%s"`, b.FileHash, entryPath)
 	if r.Header.Get("If-None-Match") == etag {
 		w.WriteHeader(http.StatusNotModified)
+		return
+	}
+
+	if b.Format == "html" {
+		w.Header().Set("Content-Type", mimeByExt(entryPath))
+		w.Header().Set("ETag", etag)
+		w.Header().Set("Cache-Control", "no-cache")
+		http.ServeFile(w, r, b.Path)
 		return
 	}
 

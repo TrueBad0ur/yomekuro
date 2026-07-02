@@ -180,7 +180,11 @@ func (s *Server) getBookFile(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Disposition",
 		fmt.Sprintf(`attachment; filename="%s"`, b.Filename))
-	w.Header().Set("Content-Type", "application/epub+zip")
+	if b.Format == "html" {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	} else {
+		w.Header().Set("Content-Type", "application/epub+zip")
+	}
 	http.ServeFile(w, r, b.Path)
 }
 

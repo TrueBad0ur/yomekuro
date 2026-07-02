@@ -29,6 +29,7 @@ CREATE TABLE books (
     reading_direction TEXT,
     cover_path        TEXT,
     cover_media_type  TEXT,
+    format            TEXT NOT NULL DEFAULT 'epub',
     created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at        TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );

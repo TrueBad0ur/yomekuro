@@ -40,7 +40,7 @@ const viewTitle     = document.getElementById('view-title');
 const breadcrumb    = document.getElementById('breadcrumb');
 const searchInput   = document.getElementById('search-input');
 const btnSearch     = document.getElementById('btn-search');
-const seriesList    = document.getElementById('series-list');
+const libraryGroups = document.getElementById('library-groups');
 const tagChips      = document.getElementById('tag-chips');
 const tagChipsEmpty = document.getElementById('tag-chips-empty');
 const navAllTitles  = document.getElementById('nav-all-titles');
@@ -309,35 +309,100 @@ async function openTagEditor(bookId, bookTitle, anchorEl) {
   popup.style.top  = (rect.bottom + 6) + 'px';
 }
 
-// ── Series sidebar + load ──────────────────────────────────────────────────────
+// ── Series (all titles grid) ─────────────────────────────────────────────────
 
 async function loadSeries() {
   let data;
   try {
     data = await fetch('/api/series').then(r => r.json());
   } catch {
-    seriesList.innerHTML = '<span class="nav-loading">Failed.</span>';
+    allSeries = [];
+    showTitles();
     return;
   }
 
   allSeries = data.items || [];
-  seriesList.innerHTML = '';
+  showTitles();
+}
 
-  for (const s of allSeries) {
-    const btn = document.createElement('button');
-    btn.className = 'series-item';
-    btn.dataset.series = s.name;
-    btn.innerHTML = `<span>${esc(s.name)}</span><span class="series-count">${s.book_count}</span>`;
-    btn.addEventListener('click', () => {
-      activeTag = '';
-      renderTagChips();
-      showBooks(s.name);
-      closeSidebar();
-    });
-    seriesList.appendChild(btn);
+// ── Library tree (sidebar) ───────────────────────────────────────────────────
+
+function seriesItemButton(s) {
+  const btn = document.createElement('button');
+  btn.className = 'series-item';
+  btn.dataset.series = s.name;
+  btn.innerHTML = `<span>${esc(s.name)}</span><span class="series-count">${s.book_count}</span>`;
+  btn.addEventListener('click', () => {
+    activeTag = '';
+    renderTagChips();
+    showBooks(s.name);
+    closeSidebar();
+  });
+  return btn;
+}
+
+async function loadLibraries() {
+  let libs;
+  try {
+    libs = (await fetch('/api/libraries').then(r => r.json())).items || [];
+  } catch {
+    libraryGroups.innerHTML = '<span class="nav-loading">Failed.</span>';
+    return;
   }
 
-  showTitles();
+  libraryGroups.innerHTML = '';
+  if (libs.length === 0) {
+    libraryGroups.innerHTML = '<span class="nav-loading">No libraries yet.</span>';
+    return;
+  }
+
+  for (const lib of libs) {
+    const group = document.createElement('div');
+    group.className = 'library-group';
+    group.innerHTML = `
+      <button class="library-group-header">
+        <span class="library-group-arrow">▸</span>
+        <span class="library-group-name">${esc(lib.name)}</span>
+      </button>
+      <div class="library-group-series" hidden></div>`;
+
+    const header = group.querySelector('.library-group-header');
+    const arrow  = group.querySelector('.library-group-arrow');
+    const seriesBox = group.querySelector('.library-group-series');
+    let loaded = false;
+
+    header.addEventListener('click', async () => {
+      if (!seriesBox.hidden) {
+        seriesBox.hidden = true;
+        arrow.textContent = '▸';
+        return;
+      }
+      seriesBox.hidden = false;
+      arrow.textContent = '▾';
+      if (loaded) return;
+      loaded = true;
+
+      seriesBox.innerHTML = '<span class="nav-loading">Loading…</span>';
+      let data;
+      try {
+        data = await fetch(`/api/series?library=${lib.id}`).then(r => r.json());
+      } catch {
+        seriesBox.innerHTML = '<span class="nav-loading">Failed.</span>';
+        return;
+      }
+      const items = data.items || [];
+      seriesBox.innerHTML = '';
+      if (items.length === 0) {
+        seriesBox.innerHTML = '<span class="nav-loading">Empty.</span>';
+        return;
+      }
+      for (const s of items) {
+        seriesBox.appendChild(seriesItemButton(s));
+      }
+    });
+
+    libraryGroups.appendChild(group);
+  }
 }
 
 // ── Breadcrumb ────────────────────────────────────────────────────────────────
@@ -425,5 +490,6 @@ function esc(s) {
 checkAuth().then(ok => {
   if (!ok) return;
   loadSeries();
+  loadLibraries();
   loadTags();
 });

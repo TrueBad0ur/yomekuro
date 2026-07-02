@@ -137,6 +137,14 @@ volumes:
 
 Then add the library at http://localhost:8080 with path `/library`.
 
+### HTML library
+
+`docker-compose.yml` also mounts `./html-library:/html-library:ro`. Drop standalone
+`.html` files there — each file is treated as a one-page book. Title comes from
+`<title>`, with optional `<meta name="author" content="...">` and
+`<meta name="reading-direction" content="rtl">` in the `<head>`. Add the library
+at http://localhost:8080 with path `/html-library`.
+
 ---
 
 ## License

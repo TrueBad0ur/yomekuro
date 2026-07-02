@@ -145,6 +145,26 @@ body.page-library { display: flex; min-height: 100vh; }
 
 .nav-loading { font-size: 0.8rem; color: var(--text-dim); padding: 0.5rem 1.3rem; }
 
+.library-groups { display: flex; flex-direction: column; }
+.library-group-header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  width: 100%;
+  text-align: left;
+  border: none;
+  border-radius: 0;
+  padding: 0.55rem 0.9rem;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--text);
+  background: transparent;
+  transition: background 0.12s;
+}
+.library-group-header:hover { background: color-mix(in srgb, var(--accent) 10%, transparent); }
+.library-group-arrow { font-size: 0.7rem; color: var(--text-dim); width: 0.8em; flex-shrink: 0; }
+.library-group-series { display: flex; flex-direction: column; }
+
 .sidebar-footer {
   border-top: 1px solid var(--border);
   padding: 0.6rem 0.5rem;

@@ -18,6 +18,11 @@ func testdataDir() string {
 	return filepath.Join(filepath.Dir(file), "..", "epub", "testdata")
 }
 
+func htmlTestdataDir() string {
+	_, file, _, _ := runtime.Caller(0)
+	return filepath.Join(filepath.Dir(file), "..", "htmlbook", "testdata")
+}
+
 func setupPool(t *testing.T) *pgxpool.Pool {
 	t.Helper()
 	dsn := os.Getenv("TEST_DB_DSN")
@@ -116,4 +121,47 @@ func TestScanner_ScanLibrary(t *testing.T) {
 		}
 	}
 	rows.Close()
+}
+
+func TestScanner_ScanLibrary_HTML(t *testing.T) {
+	pool := setupPool(t)
+	ctx := context.Background()
+
+	dataDir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dataDir, "covers"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	lib, err := db.CreateLibrary(ctx, pool, "test-scan-html", htmlTestdataDir())
+	if err != nil {
+		t.Fatalf("CreateLibrary: %v", err)
+	}
+	t.Cleanup(func() { db.DeleteLibrary(ctx, pool, lib.ID) })
+
+	s := scanner.New(pool, dataDir)
+	if err := s.ScanLibrary(ctx, lib); err != nil {
+		t.Fatalf("ScanLibrary: %v", err)
+	}
+
+	path := filepath.Join(htmlTestdataDir(), "hakase_story.html")
+	b, found, err := db.GetBookByPath(ctx, pool, path)
+	if err != nil {
+		t.Fatalf("GetBookByPath: %v", err)
+	}
+	if !found {
+		t.Fatal("html book not found after scan")
+	}
+	full, err := db.GetBookByID(ctx, pool, b.ID)
+	if err != nil {
+		t.Fatalf("GetBookByID: %v", err)
+	}
+	if full.Format != "html" {
+		t.Errorf("Format = %q, want html", full.Format)
+	}
+	if want := "博士の物語"; full.Title != want {
+		t.Errorf("Title = %q, want %q", full.Title, want)
+	}
+	if full.PageCount != 1 {
+		t.Errorf("PageCount = %d, want 1", full.PageCount)
+	}
 }

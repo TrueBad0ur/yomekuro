@@ -126,16 +126,37 @@ function applyBookmarkMark() {
     range.setStart(s.node, s.offset);
     range.setEnd(e.node, e.offset);
 
-    const mark = document.createElement('mark');
-    mark.className = 'reading-mark';
-    try {
-      range.surroundContents(mark);
-    } catch {
-      mark.appendChild(range.extractContents());
-      range.insertNode(mark);
-    }
+    markTextNodesInRange(range, target);
   } catch {
     // ignore if DOM has changed in unexpected ways
+  }
+}
+
+// Wraps only the text-node fragments that fall inside `range` in individual
+// <mark> elements, one per text node. Never moves element nodes — critical
+// for markup like <ruby><rt>…</rt></ruby>, where relocating a node out of
+// its parent (as a naive range.extractContents()+insertNode() would) breaks
+// the ruby/rt pairing and reflows the furigana layout.
+function markTextNodesInRange(range, root) {
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
+    acceptNode: node => range.intersectsNode(node) ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_REJECT,
+  });
+  const textNodes = [];
+  let node;
+  while ((node = walker.nextNode())) textNodes.push(node);
+
+  for (const textNode of textNodes) {
+    const start = textNode === range.startContainer ? range.startOffset : 0;
+    const end   = textNode === range.endContainer ? range.endOffset : textNode.length;
+    if (start >= end) continue;
+
+    const subRange = document.createRange();
+    subRange.setStart(textNode, start);
+    subRange.setEnd(textNode, end);
+
+    const mark = document.createElement('mark');
+    mark.className = 'reading-mark';
+    subRange.surroundContents(mark); // range spans a single text node: always safe
   }
 }
 
@@ -367,7 +388,7 @@ function rewriteNodes(root, chapterBase) {
 }
 
 function applyEpubStyles(doc, chapterBase) {
-  document.querySelectorAll('link.epub-style').forEach(el => el.remove());
+  document.querySelectorAll('.epub-style').forEach(el => el.remove());
   doc.querySelectorAll('link[rel="stylesheet"]').forEach(link => {
     const href = link.getAttribute('href');
     if (!href) return;
@@ -375,6 +396,12 @@ function applyEpubStyles(doc, chapterBase) {
     el.rel = 'stylesheet';
     el.className = 'epub-style';
     el.href = resolveURL(chapterBase, href);
+    document.head.appendChild(el);
+  });
+  doc.querySelectorAll('style').forEach(style => {
+    const el = document.createElement('style');
+    el.className = 'epub-style';
+    el.textContent = style.textContent;
     document.head.appendChild(el);
   });
 }
