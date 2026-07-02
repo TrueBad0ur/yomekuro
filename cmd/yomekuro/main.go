@@ -40,6 +40,8 @@ func main() {
 			slog.Error("EnsureAdmin", "err", err)
 			os.Exit(1)
 		}
+	} else {
+		slog.Warn("YOMEKURO_ADMIN_PASSWORD not set — admin will not be created automatically")
 	}
 
 	if _, err := db.EnsureDefaultLibrary(ctx, pool, "Library", "/library"); err != nil {
@@ -55,8 +57,8 @@ func main() {
 
 	watcher, err := scanner.NewWatcher(sc, pool)
 	if err != nil {
-		slog.Error("NewWatcher", "err", err)
-		os.Exit(1)
+		slog.Warn("watcher disabled", "err", err)
+		watcher = nil
 	}
 
 	libs, err := db.ListLibraries(ctx, pool)
@@ -64,7 +66,9 @@ func main() {
 		slog.Error("ListLibraries", "err", err)
 		os.Exit(1)
 	}
-	watcher.Start(ctx, libs)
+	if watcher != nil {
+		watcher.Start(ctx, libs)
+	}
 
 	if cfg.ScanOnStart {
 		for _, lib := range libs {

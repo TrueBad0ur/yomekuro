@@ -28,4 +28,4 @@ services:
       - ./html-library:/html-library:ro
       - ./data/app:/data
     ports:
-      - "8099:8080"
+      - "8080:8080"
