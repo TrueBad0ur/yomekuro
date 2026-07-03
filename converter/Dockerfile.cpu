@@ -15,6 +15,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         libglib2.0-0 \
     && rm -rf /var/lib/apt/lists/*
 
+# Silence "sending unauthenticated requests to the HF Hub" — we don't need a
+# token for the public manga-ocr-base model, just the rate limits it warns about.
+ENV HF_HUB_VERBOSITY=error
+
 # Install CPU-only torch before mokuro to prevent pip pulling CUDA/nvidia/triton
 RUN pip install --no-cache-dir \
     torch torchvision \

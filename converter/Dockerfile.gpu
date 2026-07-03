@@ -16,6 +16,17 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         libnuma1 \
     && rm -rf /var/lib/apt/lists/*
 
+# libdrm looks up PCI IDs here (AMD's own ROCm-flavored libdrm build path) to
+# print a human-readable GPU name; we don't install the ROCm apt repo (the
+# torch wheel doesn't need it), so the file is missing and libdrm logs a
+# harmless "No such file or directory" on every startup. An empty placeholder
+# silences it — it's only used for pretty-printing, not device init.
+RUN mkdir -p /opt/amdgpu/share/libdrm && touch /opt/amdgpu/share/libdrm/amdgpu.ids
+
+# Silence "sending unauthenticated requests to the HF Hub" — we don't need a
+# token for the public manga-ocr-base model, just the rate limits it warns about.
+ENV HF_HUB_VERBOSITY=error
+
 # ROCm torch wheels bundle their own ROCm runtime libs (unlike onnxruntime-rocm,
 # which needs the system ROCm apt packages) — no apt rocm repo needed here.
 # libnuma1 is a required system dependency the wheel does NOT bundle: without it,
