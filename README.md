@@ -42,8 +42,8 @@ docker build -t yomekuro:latest .
 # converter — CPU-only (recommended, ~2.5GB)
 docker build -f converter/Dockerfile.cpu -t converter:cpuonly converter/
 
-# converter — GPU/CUDA (~9.5GB, for amd64 with NVIDIA GPU)
-docker build -f converter/Dockerfile.gpucpu -t converter:gpucpu converter/
+# converter — AMD ROCm GPU (amd64 only, needs a ROCm-capable host — see below)
+docker build -f converter/Dockerfile.gpu -t converter:gpu converter/
 ```
 
 ### Multi-arch (amd64 + arm64), push to registry
@@ -60,12 +60,11 @@ docker buildx build --platform linux/amd64,linux/arm64 \
 docker buildx build --platform linux/amd64,linux/arm64 \
   -f converter/Dockerfile.cpu \
   -t truebad0ur/converter:cpuonly --push converter/
-
-# converter — GPU/CUDA (arm64 gets CPU automatically, no CUDA on arm64)
-docker buildx build --platform linux/amd64,linux/arm64 \
-  -f converter/Dockerfile.gpucpu \
-  -t truebad0ur/converter:gpucpu --push converter/
 ```
+
+`Dockerfile.gpu` (AMD ROCm) is amd64-only and tied to the host's GPU passthrough
+setup (see below) — build and run it locally with `docker compose`, don't push it
+as a multi-arch image.
 
 ### Go binary directly
 
@@ -81,14 +80,37 @@ Converts a folder of manga images into a fixed-layout EPUB with transparent OCR 
 
 ### Docker images
 
-| Dockerfile | Tag | Size | When to use |
-|------------|-----|------|-------------|
-| `Dockerfile.cpu` | `cpuonly` | ~2.5GB | Home server, NAS, any machine without NVIDIA GPU |
-| `Dockerfile.gpucpu` | `gpucpu` | ~9.5GB | amd64 with NVIDIA GPU (faster OCR) |
+| Dockerfile | Tag | When to use |
+|------------|-----|-------------|
+| `Dockerfile.cpu` | `cpuonly` | Home server, NAS, any machine without a GPU |
+| `Dockerfile.gpu` | `gpu` | amd64 with an AMD ROCm-capable GPU (faster OCR). No NVIDIA/CUDA support. |
 
-`docker-compose.yml` uses `Dockerfile.cpu` by default.
+`docker-compose.yml` uses `Dockerfile.cpu` (service `converter`) by default; the GPU
+build is service `converter-gpu`.
+
+### AMD GPU (ROCm)
+
+PyTorch's official ROCm wheels bundle their own runtime libs, so the image itself needs
+no system ROCm packages — only a host with the `amdgpu` kernel driver and
+`/dev/kfd`/`/dev/dri` exposed. `docker-compose.yml`'s `converter-gpu` service already
+passes those through plus `HSA_OVERRIDE_GFX_VERSION=10.3.0`, needed because most
+RDNA2 GPUs below the top tier (e.g. Navi 21/22/23 — RX 6700/6700S/6650XT/6600 etc.)
+report a `gfx103x` ID that ROCm doesn't officially ship optimized kernels for; overriding
+to `10.3.0` (gfx1030, RX 6800/6900 — same generation, officially supported) works in
+practice. Don't override across RDNA generations (e.g. RDNA2 → RDNA3 ids).
+
+The `group_add` GIDs (`44`/`992`) are this host's `video`/`render` group IDs
+(`getent group video render`) — check they match on a different machine.
+
+```bash
+docker compose -f converter/docker-compose.yml run --rm converter-gpu \
+  --input /library/test --output /library/Manga
+```
 
 ### Input layout
+
+Point `--input` at a folder of volume subfolders (one subfolder = one volume,
+each becomes its own EPUB):
 
 ```
 library/test/
@@ -98,6 +120,17 @@ library/test/
     ...
   Dungeon Meshi v02/
     ...
+```
+
+Or point it directly at a folder containing page images with no subfolders —
+that folder itself is treated as a single volume, producing one EPUB named
+after it:
+
+```
+library/One-Shot Story/
+  001.jpg
+  002.jpg
+  ...
 ```
 
 ### Run

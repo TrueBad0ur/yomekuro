@@ -6,3 +6,29 @@ services:
     volumes:
       - ../library:/library
       - ./data/hf-cache:/root/.cache/huggingface
+      # comic-text-detector weight (mokuro.cache) — NOT part of the HF hub cache above,
+      # it's fetched straight from a GitHub release URL; without this mount it
+      # re-downloads on every fresh container.
+      - ./data/manga-ocr-cache:/root/.cache/manga-ocr
+
+  converter-gpu:
+    build:
+      context: .
+      dockerfile: Dockerfile.gpu
+    devices:
+      - /dev/dri:/dev/dri
+      - /dev/kfd:/dev/kfd
+    group_add:
+      - "44"   # video
+      - "992"  # render
+    environment:
+      HSA_OVERRIDE_GFX_VERSION: "10.3.0"
+      ROCR_VISIBLE_DEVICES: "0"
+      HIP_VISIBLE_DEVICES: "0"
+    volumes:
+      - ../library:/library
+      - ./data/hf-cache:/root/.cache/huggingface
+      # comic-text-detector weight (mokuro.cache) — NOT part of the HF hub cache above,
+      # it's fetched straight from a GitHub release URL; without this mount it
+      # re-downloads on every fresh container.
+      - ./data/manga-ocr-cache:/root/.cache/manga-ocr

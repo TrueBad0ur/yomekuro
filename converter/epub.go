@@ -153,8 +153,14 @@ func contentOPF(vol MokuroVolume, images []imgEntry) string {
     <item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>
 `)
 	for i := range images {
-		b.WriteString(fmt.Sprintf(`    <item id="%s" href="%s" media-type="%s"/>
-`, images[i].id, images[i].href, images[i].mediaType))
+		properties := ""
+		if i == 0 {
+			// First page doubles as the cover — matches EPUB3 level-1 detection
+			// in internal/epub/cover.go (properties contains "cover-image").
+			properties = ` properties="cover-image"`
+		}
+		b.WriteString(fmt.Sprintf(`    <item id="%s" href="%s" media-type="%s"%s/>
+`, images[i].id, images[i].href, images[i].mediaType, properties))
 	}
 	for i := range vol.Pages {
 		b.WriteString(fmt.Sprintf(`    <item id="p%04d" href="pages/p%04d.xhtml" media-type="application/xhtml+xml"/>

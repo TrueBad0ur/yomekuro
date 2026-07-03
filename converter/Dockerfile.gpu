@@ -1,0 +1,35 @@
+# syntax=docker/dockerfile:1
+# AMD ROCm GPU version — amd64 only, requires a ROCm-capable host (amdgpu kernel
+# driver + /dev/kfd + /dev/dri passthrough). No NVIDIA/CUDA support.
+FROM golang:1.26-alpine AS builder
+WORKDIR /app
+COPY go.mod ./
+RUN go mod download
+COPY *.go ./
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
+    go build -ldflags="-s -w" -o /converter .
+
+FROM python:3.13-slim
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        libgl1 \
+        libglib2.0-0 \
+        libnuma1 \
+    && rm -rf /var/lib/apt/lists/*
+
+# ROCm torch wheels bundle their own ROCm runtime libs (unlike onnxruntime-rocm,
+# which needs the system ROCm apt packages) — no apt rocm repo needed here.
+# libnuma1 is a required system dependency the wheel does NOT bundle: without it,
+# HSA agent init fails silently (torch.cuda.is_available() just returns False,
+# no exception) rather than raising an obvious error.
+# Install before mokuro to prevent pip pulling default CUDA torch.
+RUN pip install --no-cache-dir \
+    torch torchvision \
+    --index-url https://download.pytorch.org/whl/rocm6.4
+
+COPY mokuro/ /mokuro/
+RUN pip install --no-cache-dir /mokuro && \
+    cp -r /mokuro/mokuro/assets \
+      "$(python3 -c 'import importlib.util,pathlib; print(pathlib.Path(importlib.util.find_spec("mokuro").origin).parent)')"
+
+COPY --from=builder /converter /converter
+ENTRYPOINT ["/converter"]
