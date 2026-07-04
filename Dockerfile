@@ -8,7 +8,7 @@ COPY . .
 RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH \
     go build -ldflags="-s -w" -o /yomekuro ./cmd/yomekuro
 
-FROM gcr.io/distroless/static-debian12
+FROM gcr.io/distroless/static-debian13
 COPY --from=builder /yomekuro /yomekuro
 EXPOSE 8080
 ENTRYPOINT ["/yomekuro"]
