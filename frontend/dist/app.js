@@ -11,6 +11,11 @@ async function checkAuth() {
   return true;
 }
 
+document.getElementById('btn-logout').addEventListener('click', async () => {
+  await fetch('/api/auth/logout', { method: 'POST' });
+  location.href = '/login';
+});
+
 // ── Theme ─────────────────────────────────────────────────────────────────────
 
 function applyTheme(theme) {
