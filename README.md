@@ -12,17 +12,34 @@ Includes a companion **converter** that turns manga image folders into fixed-lay
 cp .env.example .env
 # edit .env — set POSTGRES_PASSWORD and YOMEKURO_ADMIN_PASSWORD
 
-docker compose up -d
+docker compose up -d --build
 ```
+
+`docker-compose.yml` is a symlink to `docker-compose.dev.yml` — it builds every
+image from source (yomekuro + the converter services) on your machine. For a
+production host that should just run a released version without a Go/Python
+toolchain, use `docker-compose.prod.yml` instead, which pulls pre-built images
+from Docker Hub:
+
+```bash
+cp .env.example .env
+# edit .env — set POSTGRES_PASSWORD, YOMEKURO_ADMIN_PASSWORD, and
+# YOMEKURO_VERSION (the tag to pull, e.g. 2.0)
+
+docker compose -f docker-compose.prod.yml pull
+docker compose -f docker-compose.prod.yml up -d
+```
+
+See "Releasing" below for how versions get published to Docker Hub.
 
 Mounts `./library` (EPUB/manga) and `./html-library` (standalone `.html` files) —
 both are registered and scanned automatically on boot. Open http://localhost:8080
 and log in.
 
-This also brings up the converter services (`converter`, `converter-gpu`,
-`converter-worker` — see "Converter" below) via `docker-compose.yml`'s
-`include:`. `converter/docker-compose.yml` still works standalone if you only
-want the converter without yomekuro.
+The dev compose also brings up the converter services (`converter`,
+`converter-gpu`, `converter-worker` — see "Converter" below) via
+`docker-compose.dev.yml`'s `include:`. `converter/docker-compose.yml` still
+works standalone if you only want the converter without yomekuro.
 
 ---
 
@@ -69,6 +86,48 @@ docker buildx build --platform linux/amd64,linux/arm64 \
 `Dockerfile.gpu` is amd64-only and tied to the host's GPU passthrough — build and
 run it locally via `docker compose`, don't push it multi-arch.
 
+### Releasing (CI)
+
+`.github/workflows/release.yml` builds and pushes all three images to Docker
+Hub automatically — but only when a tag shows up, and only if that tag points
+at a commit on `main`. Ordinary commits, branches, and pull requests (including
+from forks) never trigger a build. Either of these works:
+
+```bash
+# plain git tag + push
+git checkout main
+git tag 2.0
+git push origin 2.0
+```
+
+or create a Release on GitHub (Releases → "Draft a new release" → type a new
+tag name → Publish). Both fire the workflow — a tag pushed from the CLI is a
+`push` event, a tag created via the Releases UI is a `release` event, and the
+workflow listens for both.
+
+Either way it pushes:
+
+- `truebad0ur/yomekuro:2.0` (linux/amd64 + linux/arm64)
+- `truebad0ur/converter:cpu-2.0` (linux/amd64)
+- `truebad0ur/converter:gpu-2.0` (linux/amd64)
+
+The tag name itself becomes the image tag, whatever it is — there's no `v`
+prefix convention enforced. Builds use GitHub Actions' layer cache
+(`cache-from`/`cache-to: type=gha`) scoped per image, so re-running the
+workflow (e.g. after a transient failure) doesn't rebuild layers that didn't
+change.
+
+**Required secrets**, in the `prod` GitHub Environment (Settings → Environments
+→ `prod` → Environment secrets — not repository-level secrets; the build jobs
+declare `environment: prod` specifically to pick these up. Not needed on
+forks, since forks don't inherit them and the workflow refuses to run outside
+this repo anyway):
+
+- `DOCKERHUB_USERNAME` — your Docker Hub username (`truebad0ur`).
+- `DOCKERHUB_TOKEN` — a Docker Hub **access token**, not your account
+  password: Docker Hub → Account Settings → Security → New Access Token,
+  scope "Read & Write". Paste the token value as the secret.
+
 ---
 
 ## Converter (manga OCR → EPUB)
@@ -81,7 +140,7 @@ one-shot CLI), `converter-gpu` (AMD ROCm, one-shot CLI), and `converter-worker`
 ### Upload via UI (recommended)
 
 Settings → Upload manga: pick a library, an archive (`.zip`/`.tar`/`.tar.gz`/
-`.tar.xz`/`.7z`) of raw page images, and a name. yomekuro extracts it into
+`.tar.xz`/`.7z`/`.rar`) of raw page images, and a name. yomekuro extracts it into
 `<library>/<name>-in/`, strips OS junk (`.DS_Store`, `__MACOSX/`, `._*` — common
 in macOS-made archives), and queues a row in Postgres (`conversion_jobs`
 table). `converter-worker` picks it up, runs OCR on GPU, and writes EPUBs to

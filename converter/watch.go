@@ -42,7 +42,12 @@ func drainQueue(ctx context.Context, pool *pgxpool.Pool) {
 		}
 
 		slog.Info("watch: converting", "job", j.Name, "input", j.InputPath, "output", j.OutputPath)
-		ok, fail, err := Convert(j.InputPath, j.OutputPath, "", false)
+		onVolume := func(volume string) {
+			if err := updateJobVolume(ctx, pool, j.ID, volume); err != nil {
+				slog.Warn("watch: update current volume failed", "job", j.Name, "err", err)
+			}
+		}
+		ok, fail, err := Convert(j.InputPath, j.OutputPath, "", false, onVolume)
 		switch {
 		case err != nil:
 			slog.Error("watch: conversion failed", "job", j.Name, "err", err)
@@ -90,7 +95,7 @@ func scanManualFolders(ctx context.Context, pool *pgxpool.Pool, library string) 
 		}
 
 		slog.Info("watch: converting manual folder", "input", inputDir, "output", outputDir)
-		if _, _, err := Convert(inputDir, outputDir, "", false); err != nil {
+		if _, _, err := Convert(inputDir, outputDir, "", false, nil); err != nil {
 			slog.Error("watch: manual folder conversion failed", "input", inputDir, "err", err)
 		}
 	}

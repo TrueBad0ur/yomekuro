@@ -8,6 +8,7 @@ require (
 	github.com/fsnotify/fsnotify v1.10.1
 	github.com/go-chi/chi/v5 v5.3.0
 	github.com/jackc/pgx/v5 v5.10.0
+	github.com/nwaples/rardecode/v2 v2.2.5
 	github.com/ulikunitz/xz v0.5.15
 	golang.org/x/crypto v0.46.0
 	golang.org/x/text v0.38.0

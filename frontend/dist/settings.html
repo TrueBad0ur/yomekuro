@@ -57,14 +57,14 @@
       <section class="settings-section" id="upload">
         <h2 class="settings-section-title">Upload manga</h2>
         <p style="color:var(--text-dim);font-size:.82rem;margin:0 0 .6rem">
-          Upload a .zip/.tar/.tar.gz/.tar.xz/.7z of raw manga page images (one subfolder
+          Upload a .zip/.tar/.tar.gz/.tar.xz/.7z/.rar of raw manga page images (one subfolder
           per volume, or images directly for a single volume). It's extracted, queued for
           GPU OCR conversion, and the resulting EPUBs appear in the library once done.
         </p>
         <div class="settings-row" style="gap:.5rem;flex-wrap:wrap">
           <select id="upload-library" class="user-input"></select>
           <input id="upload-name" type="text" placeholder="Name (optional, from filename)" class="user-input">
-          <input id="upload-file" type="file" accept=".zip,.tar,.tar.gz,.tgz,.tar.xz,.txz,.7z">
+          <input id="upload-file" type="file" accept=".zip,.tar,.tar.gz,.tgz,.tar.xz,.txz,.7z,.rar">
           <button id="btn-upload">Upload</button>
           <p class="login-error" id="upload-error" hidden></p>
         </div>

@@ -1,0 +1,67 @@
+# Production deployment: pulls pre-built images from Docker Hub, never builds
+# locally. Images are published by .github/workflows/release.yml when a git
+# tag is pushed to main — set YOMEKURO_VERSION below to that tag.
+#
+#   docker compose -f docker-compose.prod.yml pull
+#   docker compose -f docker-compose.prod.yml up -d
+#
+# For local development / building images yourself, use docker-compose.yml
+# (or docker-compose.dev.yml, its explicit name) instead.
+
+services:
+  db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      - ./data/postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER}"]
+      interval: 5s
+      retries: 5
+
+  yomekuro:
+    image: truebad0ur/yomekuro:${YOMEKURO_VERSION}
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      YOMEKURO_DB: "postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}?sslmode=disable"
+      YOMEKURO_DATA: /data
+      YOMEKURO_ADDR: ":8080"
+      YOMEKURO_ADMIN_USER: ${YOMEKURO_ADMIN_USER:-admin}
+      YOMEKURO_ADMIN_PASSWORD: ${YOMEKURO_ADMIN_PASSWORD}
+    volumes:
+      - ./library:/library
+      - ./html-library:/html-library:ro
+      - ./data/app:/data
+    ports:
+      - "8080:8080"
+
+  # Persistent GPU worker for manga uploads made through the UI — see
+  # converter/docker-compose.yml (dev) for the equivalent build-based service
+  # and its comments on device/group_add requirements (AMD ROCm host).
+  converter-worker:
+    image: truebad0ur/converter:gpu-${YOMEKURO_VERSION}
+    command: ["--watch", "--library", "/library"]
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    devices:
+      - /dev/dri:/dev/dri
+      - /dev/kfd:/dev/kfd
+    group_add:
+      - "44"   # video
+      - "992"  # render
+    environment:
+      HSA_OVERRIDE_GFX_VERSION: "10.3.0"
+      ROCR_VISIBLE_DEVICES: "0"
+      HIP_VISIBLE_DEVICES: "0"
+      CONVERTER_DB: "postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}?sslmode=disable"
+    volumes:
+      - ./library:/library
+      - ./data/hf-cache:/root/.cache/huggingface
+      - ./data/manga-ocr-cache:/root/.cache/manga-ocr

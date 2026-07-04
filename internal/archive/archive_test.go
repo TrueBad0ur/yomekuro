@@ -37,6 +37,43 @@ func TestExtractZip(t *testing.T) {
 	assertAbsent(t, filepath.Join(dest, ".DS_Store"))
 }
 
+func TestExtractZipCollapsesWrappingDir(t *testing.T) {
+	src := filepath.Join(t.TempDir(), "Big Order.zip")
+	f, err := os.Create(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	zw := zip.NewWriter(f)
+	// Packed as `zip -r "Big Order.zip" "Big Order/"` — every entry prefixed
+	// with the archive's own name. Filenames deliberately don't follow a
+	// clean "001.jpg" pattern — real scanlation releases use arbitrary
+	// names (this mirrors an actual archive that hit this bug:
+	// "big_order_v03_0003.jpg", "big_order_v03_0007.jpg", out of numeric
+	// order). The collapse logic only looks at directory structure, never
+	// filenames, so this is what actually needs covering.
+	writeZipEntry(t, zw, "Big Order/vol.01/scan_a7.jpg", "v1pA")
+	writeZipEntry(t, zw, "Big Order/vol.01/page_final.jpg", "v1pB")
+	writeZipEntry(t, zw, "Big Order/vol.02/00_cover.png", "v2pA")
+	writeZipEntry(t, zw, "Big Order/vol.02/17.jpg", "v2pB")
+	writeZipEntry(t, zw, "Big Order/vol.03/IMG_9931.JPG", "v3pA")
+	if err := zw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	f.Close()
+
+	dest := t.TempDir()
+	if err := Extract(src, dest); err != nil {
+		t.Fatalf("Extract: %v", err)
+	}
+
+	assertAbsent(t, filepath.Join(dest, "Big Order"))
+	assertFile(t, filepath.Join(dest, "vol.01", "scan_a7.jpg"), "v1pA")
+	assertFile(t, filepath.Join(dest, "vol.01", "page_final.jpg"), "v1pB")
+	assertFile(t, filepath.Join(dest, "vol.02", "00_cover.png"), "v2pA")
+	assertFile(t, filepath.Join(dest, "vol.02", "17.jpg"), "v2pB")
+	assertFile(t, filepath.Join(dest, "vol.03", "IMG_9931.JPG"), "v3pA")
+}
+
 func TestExtractZipSlip(t *testing.T) {
 	src := filepath.Join(t.TempDir(), "evil.zip")
 	f, err := os.Create(src)
@@ -83,6 +120,38 @@ func TestExtractTarGz(t *testing.T) {
 	}
 	assertFile(t, filepath.Join(dest, "vol1", "001.jpg"), "page1")
 	assertAbsent(t, filepath.Join(dest, "vol1", "._001.jpg"))
+}
+
+// TestExtractRar needs a real .rar fixture at testdata/sample.rar, which is
+// not committed: RAR is a proprietary format with no free encoder anywhere,
+// so a fixture can't be synthesized in a test like the other formats above.
+// Drop a real .rar there manually to exercise this path; otherwise it's
+// skipped.
+func TestExtractRar(t *testing.T) {
+	src := filepath.Join("testdata", "sample.rar")
+	if _, err := os.Stat(src); os.IsNotExist(err) {
+		t.Skip("no testdata/sample.rar fixture present")
+	}
+
+	dest := t.TempDir()
+	if err := Extract(src, dest); err != nil {
+		t.Fatalf("Extract: %v", err)
+	}
+	if !containsAnyFile(t, dest) {
+		t.Fatal("extraction produced no files")
+	}
+}
+
+func containsAnyFile(t *testing.T, dir string) bool {
+	t.Helper()
+	found := false
+	filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
+		if err == nil && !d.IsDir() {
+			found = true
+		}
+		return nil
+	})
+	return found
 }
 
 func writeZipEntry(t *testing.T, zw *zip.Writer, name, content string) {

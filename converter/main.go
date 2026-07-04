@@ -43,7 +43,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	ok, fail, err := Convert(*input, *output, *volume, *noCache)
+	ok, fail, err := Convert(*input, *output, *volume, *noCache, nil)
 	if err != nil {
 		slog.Error("mokuro failed", "err", err)
 		os.Exit(1)

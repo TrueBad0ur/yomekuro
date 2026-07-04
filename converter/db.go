@@ -45,13 +45,22 @@ func claimNextJob(ctx context.Context, pool *pgxpool.Pool) (*job, error) {
 
 func markJobDone(ctx context.Context, pool *pgxpool.Pool, id string) error {
 	_, err := pool.Exec(ctx,
-		`UPDATE conversion_jobs SET status='done', error='', updated_at=NOW() WHERE id=$1::uuid`, id)
+		`UPDATE conversion_jobs SET status='done', error='', current_volume='', updated_at=NOW() WHERE id=$1::uuid`, id)
 	return err
 }
 
 func markJobFailed(ctx context.Context, pool *pgxpool.Pool, id, errMsg string) error {
 	_, err := pool.Exec(ctx,
-		`UPDATE conversion_jobs SET status='failed', error=$2, updated_at=NOW() WHERE id=$1::uuid`, id, errMsg)
+		`UPDATE conversion_jobs SET status='failed', error=$2, current_volume='', updated_at=NOW() WHERE id=$1::uuid`, id, errMsg)
+	return err
+}
+
+// updateJobVolume records which volume mokuro is currently OCR'ing, so the
+// settings UI can show progress within a multi-volume job instead of just a
+// static "running" label.
+func updateJobVolume(ctx context.Context, pool *pgxpool.Pool, id, volume string) error {
+	_, err := pool.Exec(ctx,
+		`UPDATE conversion_jobs SET current_volume=$2, updated_at=NOW() WHERE id=$1::uuid`, id, volume)
 	return err
 }
 

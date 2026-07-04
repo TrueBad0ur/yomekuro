@@ -5,9 +5,11 @@
   --surface:   #1c1c1c;
   --sidebar:   #161616;
   --text:      #ddd;
-  --text-dim:  #666;
-  --accent:    #9b8ee0;
-  --border:    #2e2e2e;
+  --text-dim:  #7a7a7a;
+  --accent:    #6b8fd9;
+  --accent-ink: #0d1220;
+  --border:    #2a2a2a;
+  --shadow:    rgba(0, 0, 0, 0.3);
   --sidebar-w: 220px;
 }
 
@@ -16,9 +18,11 @@
   --surface:  #fff;
   --sidebar:  #fafafa;
   --text:     #1c1c1e;
-  --text-dim: #8e8e93;
-  --accent:   #6c5ce7;
-  --border:   #e5e5ea;
+  --text-dim: #74747c;
+  --accent:   #4568c4;
+  --accent-ink: #fff;
+  --border:   #e2e2e8;
+  --shadow:   rgba(30, 30, 45, 0.08);
 }
 
 /* ── Reset ────────────────────────────────────────────────────────────────── */
@@ -115,9 +119,9 @@ body.page-library { display: flex; min-height: 100vh; }
 .nav-item.active { background: color-mix(in srgb, var(--accent) 15%, transparent); color: var(--accent); font-weight: 600; }
 
 .nav-section-label {
-  font-size: 0.68rem;
-  font-weight: 700;
-  letter-spacing: 0.08em;
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
   color: var(--text-dim);
   padding: 0.9rem 0.9rem 0.3rem;
   text-transform: uppercase;
@@ -251,7 +255,7 @@ body.page-library { display: flex; min-height: 100vh; }
   color: var(--accent);
   flex-shrink: 0;
 }
-#btn-search:hover { background: var(--accent); color: #fff; }
+#btn-search:hover { background: var(--accent); color: var(--accent-ink); }
 .genre-row {
   display: flex;
   align-items: center;
@@ -259,9 +263,9 @@ body.page-library { display: flex; min-height: 100vh; }
   min-height: 1.6rem;
 }
 .genre-label {
-  font-size: 0.72rem;
-  font-weight: 700;
-  letter-spacing: 0.06em;
+  font-size: 0.73rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
   text-transform: uppercase;
   color: var(--text-dim);
   flex-shrink: 0;
@@ -288,7 +292,7 @@ body.page-library { display: flex; min-height: 100vh; }
   transition: background 0.12s, color 0.12s, border-color 0.12s;
 }
 .tag-chip:hover { border-color: var(--accent); color: var(--accent); }
-.tag-chip.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+.tag-chip.active { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
 
 /* Books grid */
 .books-grid {
@@ -302,9 +306,10 @@ body.page-library { display: flex; min-height: 100vh; }
   border-radius: 8px;
   overflow: hidden;
   background: var(--surface);
-  transition: border-color 0.15s, transform 0.1s;
+  box-shadow: 0 1px 2px var(--shadow);
+  transition: border-color 0.15s, transform 0.1s, box-shadow 0.15s;
 }
-.book-card:hover { border-color: var(--accent); transform: translateY(-2px); }
+.book-card:hover { border-color: var(--accent); transform: translateY(-2px); box-shadow: 0 6px 16px var(--shadow); }
 .book-card a { display: block; color: inherit; }
 .book-card img {
   width: 100%;
@@ -441,7 +446,7 @@ body.page-reader { display: flex; flex-direction: column; min-height: 100vh; }
 .nav-info { flex-shrink: 0; font-size: 0.8rem; color: var(--text-dim); }
 .nav-buttons { display: flex; gap: 0.4rem; flex-shrink: 0; }
 .nav-buttons button { padding: 0.35rem 0.9rem; }
-.nav-buttons button.active { background: var(--accent); color: #fff; border-color: var(--accent); }
+.nav-buttons button.active { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
 
 #reader-content { flex: 1; }
 
@@ -616,6 +621,7 @@ body.page-login {
   border: 1px solid var(--border);
   border-radius: 12px;
   margin: 1rem;
+  box-shadow: 0 8px 28px var(--shadow);
 }
 .login-logo {
   font-size: 1.6rem;
@@ -660,11 +666,12 @@ body.page-login {
   padding: 0.6rem;
   font-size: 0.9rem;
   background: var(--accent);
-  color: #fff;
+  color: var(--accent-ink);
   border: none;
   border-radius: 6px;
+  font-weight: 600;
 }
-.login-submit:hover { opacity: 0.9; color: #fff; }
+.login-submit:hover { opacity: 0.9; color: var(--accent-ink); }
 .login-error {
   font-size: 0.82rem;
   color: #e07070;
@@ -722,12 +729,12 @@ body.page-settings { max-width: 1080px; margin: 0 auto; padding: 0 1.5rem 3rem; 
 }
 .settings-section.active { display: block; }
 .settings-section-title {
-  font-size: 0.7rem;
-  font-weight: 700;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--text-dim);
-  margin-bottom: 0.9rem;
+  font-size: 1.05rem;
+  font-weight: 600;
+  color: var(--text);
+  margin-bottom: 1rem;
+  padding-bottom: 0.6rem;
+  border-bottom: 1px solid var(--border);
 }
 
 @media (max-width: 720px) {
@@ -748,12 +755,13 @@ body.page-settings { max-width: 1080px; margin: 0 auto; padding: 0 1.5rem 3rem; 
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: 8px;
+  box-shadow: 0 1px 2px var(--shadow);
 }
 .settings-row-label { font-size: 0.9rem; }
 
 .theme-switcher { display: flex; gap: 0.4rem; }
 .theme-opt { padding: 0.35rem 0.9rem; font-size: 0.85rem; border-radius: 6px; }
-.theme-opt.active { background: var(--accent); color: #fff; border-color: var(--accent); }
+.theme-opt.active { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
 
 .settings-libraries { display: flex; flex-direction: column; gap: 0.75rem; }
 
@@ -762,6 +770,7 @@ body.page-settings { max-width: 1080px; margin: 0 auto; padding: 0 1.5rem 3rem; 
   border-radius: 8px;
   padding: 0.85rem 1rem;
   background: var(--surface);
+  box-shadow: 0 1px 2px var(--shadow);
 }
 .library-card-name { font-weight: 600; font-size: 0.9rem; margin-bottom: 0.2rem; }
 .library-card-path { font-size: 0.75rem; color: var(--text-dim); margin-bottom: 0.7rem; word-break: break-all; }
@@ -776,6 +785,15 @@ body.page-settings { max-width: 1080px; margin: 0 auto; padding: 0 1.5rem 3rem; 
   border-color: color-mix(in srgb, #e07070 40%, transparent);
 }
 .job-delete-btn:hover:not(:disabled) { background: color-mix(in srgb, #e07070 12%, transparent); }
+
+.job-current-volume {
+  font-size: 0.78rem;
+  color: var(--text-dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 220px;
+}
 
 .job-status-pending { color: var(--text-dim); }
 .job-status-running { color: var(--accent); font-weight: 600; }

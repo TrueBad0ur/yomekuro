@@ -263,6 +263,7 @@ async function loadConversionJobs() {
       <div class="library-card-name">${esc(j.name)}</div>
       <div class="library-card-footer">
         <span class="library-card-count job-status-${esc(j.status)}">${esc(j.status)}</span>
+        ${j.status === 'running' && j.current_volume ? `<span class="job-current-volume">${esc(j.current_volume)}</span>` : ''}
         ${j.error ? `<span style="color:#e07070;font-size:.78rem">${esc(j.error)}</span>` : ''}
         <button class="job-delete-btn" data-id="${esc(j.id)}" title="Remove from list">Delete</button>
       </div>

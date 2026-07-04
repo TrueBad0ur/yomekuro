@@ -78,6 +78,7 @@ CREATE TABLE conversion_jobs (
     output_path TEXT NOT NULL,
     status      TEXT NOT NULL DEFAULT 'pending', -- pending | running | done | failed
     error       TEXT NOT NULL DEFAULT '',
+    current_volume TEXT NOT NULL DEFAULT '',
     created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );

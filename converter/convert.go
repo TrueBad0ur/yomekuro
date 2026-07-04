@@ -13,7 +13,9 @@ import (
 // EPUB per volume into output. If volume is non-empty, only that subdirectory
 // of input is (re-)built into output — matching the pre-existing --volume CLI
 // flag behavior. Returns the number of volumes built successfully and failed.
-func Convert(input, output, volume string, noCache bool) (ok, fail int, err error) {
+// onVolume, if non-nil, is called with each volume's name as mokuro starts
+// OCR'ing it — callers use this to surface live progress; pass nil to skip.
+func Convert(input, output, volume string, noCache bool, onVolume func(string)) (ok, fail int, err error) {
 	if err := os.MkdirAll(output, 0755); err != nil {
 		return 0, 0, fmt.Errorf("create output dir: %w", err)
 	}
@@ -61,7 +63,7 @@ func Convert(input, output, volume string, noCache bool) (ok, fail int, err erro
 		}
 	}
 
-	if err := runMokuro(mokuroDir, volumeDirs, noCache); err != nil {
+	if err := runMokuro(mokuroDir, volumeDirs, noCache, onVolume); err != nil {
 		return 0, 0, fmt.Errorf("mokuro: %w", err)
 	}
 

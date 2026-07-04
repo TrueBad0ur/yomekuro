@@ -1,4 +1,4 @@
-// Package archive extracts user-uploaded manga archives (zip/tar/tar.gz/tar.xz/7z)
+// Package archive extracts user-uploaded manga archives (zip/tar/tar.gz/tar.xz/7z/rar)
 // onto disk, skipping OS junk files and guarding against path traversal.
 package archive
 
@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	"github.com/bodgit/sevenzip"
+	"github.com/nwaples/rardecode/v2"
 	"github.com/ulikunitz/xz"
 )
 
@@ -62,6 +63,8 @@ func extractByFormat(archivePath, destDir string) error {
 		})
 	case strings.HasSuffix(lower, ".7z"):
 		return extract7z(archivePath, destDir)
+	case strings.HasSuffix(lower, ".rar"):
+		return extractRar(archivePath, destDir)
 	default:
 		return fmt.Errorf("archive: unsupported format: %s", filepath.Ext(archivePath))
 	}
@@ -202,6 +205,53 @@ func extract7z(archivePath, destDir string) error {
 		}
 	}
 	return nil
+}
+
+func extractRar(archivePath, destDir string) error {
+	rc, err := rardecode.OpenReader(archivePath)
+	if err != nil {
+		return fmt.Errorf("archive: open rar: %w", err)
+	}
+	defer rc.Close()
+
+	for {
+		hdr, err := rc.Next()
+		if err == io.EOF {
+			return nil
+		}
+		if err != nil {
+			return fmt.Errorf("archive: rar: %w", err)
+		}
+		if isJunk(hdr.Name) {
+			continue
+		}
+		destPath, err := safeJoin(destDir, hdr.Name)
+		if err != nil {
+			return err
+		}
+		if hdr.IsDir {
+			if err := os.MkdirAll(destPath, 0o755); err != nil {
+				return err
+			}
+			continue
+		}
+		if err := os.MkdirAll(filepath.Dir(destPath), 0o755); err != nil {
+			return err
+		}
+		mode := hdr.Mode()
+		if mode == 0 {
+			mode = 0o644
+		}
+		out, err := os.OpenFile(destPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, mode)
+		if err != nil {
+			return err
+		}
+		if _, err := io.Copy(out, rc); err != nil {
+			out.Close()
+			return fmt.Errorf("archive: %s: %w", hdr.Name, err)
+		}
+		out.Close()
+	}
 }
 
 // isJunk reports whether an archive entry is OS-generated cruft that should

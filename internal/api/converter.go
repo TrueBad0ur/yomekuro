@@ -15,7 +15,7 @@ import (
 
 const maxUploadBytes = 5 << 30 // 5GiB — raw manga scans can be large
 
-var archiveExts = []string{".tar.gz", ".tar.xz", ".tgz", ".txz", ".tar", ".zip", ".7z"}
+var archiveExts = []string{".tar.gz", ".tar.xz", ".tgz", ".txz", ".tar", ".zip", ".7z", ".rar"}
 
 // matchedArchiveExt returns the recognized (possibly compound, e.g. ".tar.gz")
 // extension suffix of filename, or "" if none match. filepath.Ext() can't be
@@ -82,7 +82,7 @@ func (s *Server) uploadArchive(w http.ResponseWriter, r *http.Request) {
 	defer file.Close()
 
 	if !isSupportedArchive(header.Filename) {
-		respondError(w, http.StatusBadRequest, "unsupported archive format (need .zip/.tar/.tar.gz/.tar.xz/.7z)")
+		respondError(w, http.StatusBadRequest, "unsupported archive format (need .zip/.tar/.tar.gz/.tar.xz/.7z/.rar)")
 		return
 	}
 
@@ -179,12 +179,13 @@ func containsImage(dir string) bool {
 }
 
 type conversionJobDTO struct {
-	ID        string `json:"id"`
-	Name      string `json:"name"`
-	LibraryID string `json:"library_id"`
-	Status    string `json:"status"`
-	Error     string `json:"error,omitempty"`
-	UpdatedAt string `json:"updated_at"`
+	ID            string `json:"id"`
+	Name          string `json:"name"`
+	LibraryID     string `json:"library_id"`
+	Status        string `json:"status"`
+	Error         string `json:"error,omitempty"`
+	CurrentVolume string `json:"current_volume,omitempty"`
+	UpdatedAt     string `json:"updated_at"`
 }
 
 func (s *Server) listConversionJobs(w http.ResponseWriter, r *http.Request) {
@@ -197,12 +198,13 @@ func (s *Server) listConversionJobs(w http.ResponseWriter, r *http.Request) {
 	dtos := make([]conversionJobDTO, len(jobs))
 	for i, j := range jobs {
 		dtos[i] = conversionJobDTO{
-			ID:        db.UUIDString(j.ID),
-			Name:      j.Name,
-			LibraryID: db.UUIDString(j.LibraryID),
-			Status:    j.Status,
-			Error:     j.Error,
-			UpdatedAt: j.UpdatedAt.UTC().Format("2006-01-02T15:04:05Z"),
+			ID:            db.UUIDString(j.ID),
+			Name:          j.Name,
+			LibraryID:     db.UUIDString(j.LibraryID),
+			Status:        j.Status,
+			Error:         j.Error,
+			CurrentVolume: j.CurrentVolume,
+			UpdatedAt:     j.UpdatedAt.UTC().Format("2006-01-02T15:04:05Z"),
 		}
 	}
 	respond(w, map[string]any{"items": dtos})

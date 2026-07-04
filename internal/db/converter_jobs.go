@@ -8,15 +8,16 @@ import (
 )
 
 type ConversionJob struct {
-	ID         [16]byte
-	LibraryID  [16]byte
-	Name       string
-	InputPath  string
-	OutputPath string
-	Status     string
-	Error      string
-	CreatedAt  time.Time
-	UpdatedAt  time.Time
+	ID            [16]byte
+	LibraryID     [16]byte
+	Name          string
+	InputPath     string
+	OutputPath    string
+	Status        string
+	Error         string
+	CurrentVolume string
+	CreatedAt     time.Time
+	UpdatedAt     time.Time
 }
 
 func CreateConversionJob(ctx context.Context, pool *pgxpool.Pool, libraryID [16]byte, name, inputPath, outputPath string) (ConversionJob, error) {
@@ -24,15 +25,15 @@ func CreateConversionJob(ctx context.Context, pool *pgxpool.Pool, libraryID [16]
 	err := pool.QueryRow(ctx,
 		`INSERT INTO conversion_jobs (library_id, name, input_path, output_path)
 		 VALUES ($1, $2, $3, $4)
-		 RETURNING id, library_id, name, input_path, output_path, status, error, created_at, updated_at`,
+		 RETURNING id, library_id, name, input_path, output_path, status, error, current_volume, created_at, updated_at`,
 		libraryID, name, inputPath, outputPath,
-	).Scan(&j.ID, &j.LibraryID, &j.Name, &j.InputPath, &j.OutputPath, &j.Status, &j.Error, &j.CreatedAt, &j.UpdatedAt)
+	).Scan(&j.ID, &j.LibraryID, &j.Name, &j.InputPath, &j.OutputPath, &j.Status, &j.Error, &j.CurrentVolume, &j.CreatedAt, &j.UpdatedAt)
 	return j, err
 }
 
 func ListConversionJobs(ctx context.Context, pool *pgxpool.Pool) ([]ConversionJob, error) {
 	rows, err := pool.Query(ctx,
-		`SELECT id, library_id, name, input_path, output_path, status, error, created_at, updated_at
+		`SELECT id, library_id, name, input_path, output_path, status, error, current_volume, created_at, updated_at
 		 FROM conversion_jobs ORDER BY created_at DESC`)
 	if err != nil {
 		return nil, err
@@ -42,7 +43,7 @@ func ListConversionJobs(ctx context.Context, pool *pgxpool.Pool) ([]ConversionJo
 	var jobs []ConversionJob
 	for rows.Next() {
 		var j ConversionJob
-		if err := rows.Scan(&j.ID, &j.LibraryID, &j.Name, &j.InputPath, &j.OutputPath, &j.Status, &j.Error, &j.CreatedAt, &j.UpdatedAt); err != nil {
+		if err := rows.Scan(&j.ID, &j.LibraryID, &j.Name, &j.InputPath, &j.OutputPath, &j.Status, &j.Error, &j.CurrentVolume, &j.CreatedAt, &j.UpdatedAt); err != nil {
 			return nil, err
 		}
 		jobs = append(jobs, j)

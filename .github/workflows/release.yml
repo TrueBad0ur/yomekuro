@@ -1,0 +1,142 @@
+name: Release images
+
+# Publishes tagged releases to Docker Hub:
+#   truebad0ur/yomekuro:<tag>
+#   truebad0ur/converter:cpu-<tag>
+#   truebad0ur/converter:gpu-<tag>
+#
+# Triggered by a tag showing up on the repo — either a plain `git tag 2.0 &&
+# git push origin 2.0` (fires `push`), or creating a GitHub Release through the
+# web UI with a new tag (fires `release`, not `push` — GitHub does not treat
+# the tag ref created by "Draft a new release" as a tag push for `on: push:
+# tags:` purposes). Both are handled so either workflow works.
+# Ordinary commits/branches/PRs never trigger a build. The guard job additionally
+# refuses to build unless the tagged commit is reachable from main and the
+# workflow is running in the upstream repo (not a fork) — a fork pushing its own
+# tags builds in the fork's own Actions with the fork's own (absent) secrets,
+# but the explicit check is kept as a second line of defense.
+
+on:
+  push:
+    tags:
+      - '*'
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+jobs:
+  guard:
+    name: Verify tag is on main
+    runs-on: ubuntu-latest
+    if: github.repository == 'TrueBad0ur/yomekuro'
+    outputs:
+      version: ${{ steps.version.outputs.value }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Fetch main
+        run: git fetch origin main
+
+      - name: Refuse to build unless the tag is on main
+        run: |
+          if ! git merge-base --is-ancestor "${GITHUB_SHA}" origin/main; then
+            echo "::error::Tag '${GITHUB_REF_NAME}' (commit ${GITHUB_SHA}) is not reachable from main — refusing to build release images."
+            exit 1
+          fi
+
+      - id: version
+        run: echo "value=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+
+  build-yomekuro:
+    name: Build & push yomekuro
+    needs: guard
+    runs-on: ubuntu-latest
+    environment: prod
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: truebad0ur/yomekuro:${{ needs.guard.outputs.version }}
+          cache-from: type=gha,scope=yomekuro
+          cache-to: type=gha,mode=max,scope=yomekuro
+
+  build-converter-cpu:
+    name: Build & push converter (cpu)
+    needs: guard
+    runs-on: ubuntu-latest
+    environment: prod
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: ./converter
+          file: ./converter/Dockerfile.cpu
+          platforms: linux/amd64
+          push: true
+          tags: truebad0ur/converter:cpu-${{ needs.guard.outputs.version }}
+          cache-from: type=gha,scope=converter-cpu
+          cache-to: type=gha,mode=max,scope=converter-cpu
+
+  build-converter-gpu:
+    name: Build & push converter (gpu)
+    needs: guard
+    runs-on: ubuntu-latest
+    environment: prod
+    steps:
+      # The ROCm torch wheel alone is ~4.5GB; GitHub-hosted runners only have
+      # ~14GB free by default (most of the disk is reserved by preinstalled
+      # toolchains this job never uses), so the build runs out of space
+      # mid-`pip install` without this. Reclaims ~30GB by removing tool-cache
+      # bloat the go/python/docker steps below don't need.
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache
+          sudo docker system prune -af --volumes
+          df -h /
+
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: ./converter
+          file: ./converter/Dockerfile.gpu
+          platforms: linux/amd64
+          push: true
+          tags: truebad0ur/converter:gpu-${{ needs.guard.outputs.version }}
+          cache-from: type=gha,scope=converter-gpu
+          cache-to: type=gha,mode=max,scope=converter-gpu
