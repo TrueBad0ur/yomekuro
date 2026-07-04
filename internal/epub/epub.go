@@ -139,7 +139,6 @@ func OpenManifest(filePath string) ([]SpineItem, string, bool, []TocEntry, error
 	return spine, direction, fixedLayout, toc, nil
 }
 
-
 // ReadZipEntry opens the epub at filePath and reads a single named entry.
 // Used for one-off reads; for serving many entries use an open *zip.ReadCloser.
 func ReadZipEntry(filePath, entryName string) ([]byte, error) {

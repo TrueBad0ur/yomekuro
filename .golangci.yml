@@ -1,0 +1,13 @@
+version: "2"
+
+linters:
+  enable:
+    - govet
+    - staticcheck
+    - unused
+    - ineffassign
+  disable:
+    # This codebase idiomatically ignores errors from deferred Close() calls
+    # (32 call sites as of writing) — that's an established, deliberate style
+    # here, not oversight, so errcheck's default behavior is all noise.
+    - errcheck

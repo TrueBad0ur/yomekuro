@@ -1,0 +1,85 @@
+name: Test
+
+# Runs on every push and PR (including forks) — unlike release.yml, this never
+# touches secrets or publishes anything, so there's no reason to restrict it.
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  yomekuro:
+    name: yomekuro module
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: gofmt
+        run: |
+          fmt_out="$(gofmt -l .)"
+          if [ -n "$fmt_out" ]; then
+            echo "::error::gofmt needs to be run on:"
+            echo "$fmt_out"
+            exit 1
+          fi
+
+      - name: go vet
+        run: go vet ./...
+
+      - name: go build
+        run: go build ./...
+
+      - name: go test
+        # internal/epub needs real (copyrighted, not committed) .epub fixtures
+        # at internal/epub/testdata/*.epub — it always fails without them, see
+        # CLAUDE.md. Excluded here; every other package's tests run for real,
+        # and internal/scanner's DB-backed tests skip themselves when
+        # TEST_DB_DSN is unset rather than failing.
+        run: go test $(go list ./... | grep -v /internal/epub)
+
+      - uses: golangci/golangci-lint-action@v9
+        with:
+          version: v2.12.2
+          working-directory: .
+
+  converter:
+    name: converter module
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: converter/go.mod
+
+      - name: gofmt
+        working-directory: converter
+        run: |
+          fmt_out="$(gofmt -l .)"
+          if [ -n "$fmt_out" ]; then
+            echo "::error::gofmt needs to be run on:"
+            echo "$fmt_out"
+            exit 1
+          fi
+
+      - name: go vet
+        working-directory: converter
+        run: go vet ./...
+
+      - name: go build
+        working-directory: converter
+        run: go build ./...
+
+      - uses: golangci/golangci-lint-action@v9
+        with:
+          version: v2.12.2
+          working-directory: converter

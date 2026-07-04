@@ -110,6 +110,11 @@ func (c *zipCache) get(path, hash string) (*zip.ReadCloser, error) {
 	return rc, nil
 }
 
+// closeAll has no caller yet — nothing currently hooks it into server shutdown.
+// Kept (not deleted) since it's the obvious place to release cached zip
+// handles on a graceful shutdown if that gets added later.
+//
+//nolint:unused
 func (c *zipCache) closeAll() {
 	c.mu.Lock()
 	defer c.mu.Unlock()

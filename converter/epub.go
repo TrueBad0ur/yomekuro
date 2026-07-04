@@ -159,19 +159,19 @@ func contentOPF(vol MokuroVolume, images []imgEntry) string {
 			// in internal/epub/cover.go (properties contains "cover-image").
 			properties = ` properties="cover-image"`
 		}
-		b.WriteString(fmt.Sprintf(`    <item id="%s" href="%s" media-type="%s"%s/>
-`, images[i].id, images[i].href, images[i].mediaType, properties))
+		fmt.Fprintf(&b, `    <item id="%s" href="%s" media-type="%s"%s/>
+`, images[i].id, images[i].href, images[i].mediaType, properties)
 	}
 	for i := range vol.Pages {
-		b.WriteString(fmt.Sprintf(`    <item id="p%04d" href="pages/p%04d.xhtml" media-type="application/xhtml+xml"/>
-`, i+1, i+1))
+		fmt.Fprintf(&b, `    <item id="p%04d" href="pages/p%04d.xhtml" media-type="application/xhtml+xml"/>
+`, i+1, i+1)
 	}
 	b.WriteString(`  </manifest>
   <spine page-progression-direction="rtl">
 `)
 	for i := range vol.Pages {
-		b.WriteString(fmt.Sprintf(`    <itemref idref="p%04d"/>
-`, i+1))
+		fmt.Fprintf(&b, `    <itemref idref="p%04d"/>
+`, i+1)
 	}
 	b.WriteString(`  </spine>
 </package>`)
@@ -191,8 +191,8 @@ func navXHTML(vol MokuroVolume) string {
     <ol>
 `)
 	for i := range vol.Pages {
-		b.WriteString(fmt.Sprintf(`      <li><a href="pages/p%04d.xhtml">Page %d</a></li>
-`, i+1, i+1))
+		fmt.Fprintf(&b, `      <li><a href="pages/p%04d.xhtml">Page %d</a></li>
+`, i+1, i+1)
 	}
 	b.WriteString(`    </ol>
   </nav>
@@ -218,7 +218,7 @@ func pageXHTML(num int, page MokuroPage, imgHref string) string {
 	imgStyle := "position:absolute;top:0;left:0;width:100%;height:100%;display:block;"
 
 	var b strings.Builder
-	b.WriteString(fmt.Sprintf(`<?xml version="1.0" encoding="UTF-8"?>
+	fmt.Fprintf(&b, `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE html>
 <html xmlns="http://www.w3.org/1999/xhtml">
 <head>
@@ -229,7 +229,7 @@ func pageXHTML(num int, page MokuroPage, imgHref string) string {
 <body style="margin:0;padding:0;">
   <div style="%s">
     <img src="%s" alt="page %d" style="%s"/>
-`, w, h, num, pageStyle, imgHref, num, imgStyle))
+`, w, h, num, pageStyle, imgHref, num, imgStyle)
 
 	for _, blk := range page.Blocks {
 		// Preferred path: render each line at its own coordinates so transparent

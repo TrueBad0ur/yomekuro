@@ -197,9 +197,9 @@ func (s *Server) listSeries(w http.ResponseWriter, r *http.Request) {
 	}
 
 	type seriesDTO struct {
-		Name        string `json:"name"`
-		BookCount   int    `json:"book_count"`
-		CoverURL    string `json:"cover_url"`
+		Name      string `json:"name"`
+		BookCount int    `json:"book_count"`
+		CoverURL  string `json:"cover_url"`
 	}
 	dtos := make([]seriesDTO, len(series))
 	for i, sr := range series {

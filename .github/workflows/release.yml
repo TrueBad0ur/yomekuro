@@ -14,7 +14,11 @@ name: Release images
 # refuses to build unless the tagged commit is reachable from main and the
 # workflow is running in the upstream repo (not a fork) — a fork pushing its own
 # tags builds in the fork's own Actions with the fork's own (absent) secrets,
-# but the explicit check is kept as a second line of defense.
+# but the explicit check is kept as a second line of defense. The `test` job
+# reruns test.yml (gofmt/vet/build/go test/golangci-lint for both modules) as
+# a reusable workflow — all three build jobs need it, so a tag that fails
+# tests never gets published, regardless of whether test.yml already happened
+# to run for that commit via its own push/pull_request triggers.
 
 on:
   push:
@@ -51,9 +55,14 @@ jobs:
       - id: version
         run: echo "value=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
 
+  test:
+    name: Run tests
+    needs: guard
+    uses: ./.github/workflows/test.yml
+
   build-yomekuro:
     name: Build & push yomekuro
-    needs: guard
+    needs: [guard, test]
     runs-on: ubuntu-latest
     environment: prod
     steps:
@@ -78,13 +87,19 @@ jobs:
 
   build-converter-cpu:
     name: Build & push converter (cpu)
-    needs: guard
+    needs: [guard, test]
     runs-on: ubuntu-latest
     environment: prod
     steps:
       - uses: actions/checkout@v4
         with:
           submodules: recursive
+
+      # Needed for the arm64 leg: unlike the Go builder stage (which
+      # cross-compiles without executing anything), the python:3.13-slim final
+      # stage's apt-get/pip install RUN steps actually execute during build —
+      # on an amd64 runner that means emulating arm64 via QEMU.
+      - uses: docker/setup-qemu-action@v3
 
       - uses: docker/setup-buildx-action@v3
 
@@ -97,7 +112,7 @@ jobs:
         with:
           context: ./converter
           file: ./converter/Dockerfile.cpu
-          platforms: linux/amd64
+          platforms: linux/amd64,linux/arm64
           push: true
           tags: truebad0ur/converter:cpu-${{ needs.guard.outputs.version }}
           cache-from: type=gha,scope=converter-cpu
@@ -105,7 +120,7 @@ jobs:
 
   build-converter-gpu:
     name: Build & push converter (gpu)
-    needs: guard
+    needs: [guard, test]
     runs-on: ubuntu-latest
     environment: prod
     steps:

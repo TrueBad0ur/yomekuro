@@ -12,10 +12,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/truebad0ur/yomekuro/internal/db"
 	"github.com/truebad0ur/yomekuro/internal/epub"
 	"github.com/truebad0ur/yomekuro/internal/htmlbook"
-	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 type Scanner struct {
@@ -39,7 +39,7 @@ func (s *Scanner) ScanLibrary(ctx context.Context, lib db.Library) error {
 			slog.Warn("scan: walk error", "path", path, "err", err)
 			return nil
 		}
-		if d.IsDir() || !(isEPUB(d.Name()) || isHTML(d.Name())) {
+		if d.IsDir() || (!isEPUB(d.Name()) && !isHTML(d.Name())) {
 			return nil
 		}
 		found = append(found, path)

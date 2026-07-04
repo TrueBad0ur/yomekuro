@@ -55,13 +55,13 @@ func (s *Server) putProgress(w http.ResponseWriter, r *http.Request) {
 	user, _ := userFromCtx(r)
 
 	var req struct {
-		SpineIndex    int      `json:"spine_index"`
-		Progression   float64  `json:"progression"`
-		Percentage    float64  `json:"percentage"`
-		BookmarkSpine *int     `json:"bookmark_spine"`
-		BookmarkElem  *int     `json:"bookmark_elem"`
-		BookmarkStart *int     `json:"bookmark_start"`
-		BookmarkEnd   *int     `json:"bookmark_end"`
+		SpineIndex    int     `json:"spine_index"`
+		Progression   float64 `json:"progression"`
+		Percentage    float64 `json:"percentage"`
+		BookmarkSpine *int    `json:"bookmark_spine"`
+		BookmarkElem  *int    `json:"bookmark_elem"`
+		BookmarkStart *int    `json:"bookmark_start"`
+		BookmarkEnd   *int    `json:"bookmark_end"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		respondError(w, http.StatusBadRequest, "invalid JSON")

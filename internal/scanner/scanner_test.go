@@ -8,9 +8,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/truebad0ur/yomekuro/internal/db"
 	"github.com/truebad0ur/yomekuro/internal/scanner"
-	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 func testdataDir() string {
@@ -82,6 +82,8 @@ func TestScanner_ScanLibrary(t *testing.T) {
 
 	// Second scan: no files changed → updated count should be 0.
 	// We track this indirectly via updated_at: it should NOT advance.
+	//
+	//nolint:unused // pre-existing, unclear if still needed for a planned assertion
 	type updatedAt struct {
 		path string
 		at   time.Time

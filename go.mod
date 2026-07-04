@@ -1,6 +1,6 @@
 module github.com/truebad0ur/yomekuro
 
-go 1.26
+go 1.25.0
 
 require (
 	github.com/beevik/etree v1.6.0
