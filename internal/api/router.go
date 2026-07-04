@@ -8,6 +8,7 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/truebad0ur/yomekuro/frontend"
+	"github.com/truebad0ur/yomekuro/internal/auth"
 	"github.com/truebad0ur/yomekuro/internal/scanner"
 )
 
@@ -46,13 +47,6 @@ func NewRouter(pool *pgxpool.Pool, sc *scanner.Scanner, w *scanner.Watcher, data
 		r.Get("/api/auth/me", s.me)
 
 		r.Get("/api/libraries", s.listLibraries)
-		r.Post("/api/libraries", s.createLibrary)
-		r.Delete("/api/libraries/{id}", s.deleteLibrary)
-		r.Post("/api/libraries/{id}/scan", s.triggerScan)
-
-		r.Post("/api/converter/upload", s.uploadArchive)
-		r.Get("/api/converter/jobs", s.listConversionJobs)
-		r.Delete("/api/converter/jobs/{id}", s.deleteConversionJob)
 
 		r.Get("/api/books", s.listBooks)
 		r.Get("/api/books/{id}", s.getBook)
@@ -66,14 +60,26 @@ func NewRouter(pool *pgxpool.Pool, sc *scanner.Scanner, w *scanner.Watcher, data
 
 		r.Get("/api/tags", s.listTags)
 		r.Get("/api/books/{id}/tags", s.getBookTags)
-		r.Put("/api/books/{id}/tags", s.setBookTags)
 
 		r.Get("/api/books/{id}/progress", s.getProgress)
 		r.Put("/api/books/{id}/progress", s.putProgress)
 
-		// Admin-only
+		// Admin-only — library/user management, manga upload, and genre tagging
+		// are all settings-page features; regular users get read-only access
+		// to everything above (browse, read, track progress).
 		r.Group(func(r chi.Router) {
 			r.Use(s.adminRequired)
+
+			r.Post("/api/libraries", s.createLibrary)
+			r.Delete("/api/libraries/{id}", s.deleteLibrary)
+			r.Post("/api/libraries/{id}/scan", s.triggerScan)
+
+			r.Post("/api/converter/upload", s.uploadArchive)
+			r.Get("/api/converter/jobs", s.listConversionJobs)
+			r.Delete("/api/converter/jobs/{id}", s.deleteConversionJob)
+
+			r.Put("/api/books/{id}/tags", s.setBookTags)
+
 			r.Get("/api/users", s.listUsers)
 			r.Post("/api/users", s.createUser)
 			r.Patch("/api/users/{id}", s.updateUser)
@@ -88,6 +94,11 @@ func NewRouter(pool *pgxpool.Pool, sc *scanner.Scanner, w *scanner.Watcher, data
 		http.ServeFileFS(w, r, sub, "reader.html")
 	})
 	r.Get("/settings", func(w http.ResponseWriter, r *http.Request) {
+		user, err := auth.GetUserBySession(r.Context(), s.db, sessionToken(r))
+		if err != nil || !user.IsAdmin {
+			http.Redirect(w, r, "/", http.StatusSeeOther)
+			return
+		}
 		http.ServeFileFS(w, r, sub, "settings.html")
 	})
 	r.Get("/login", func(w http.ResponseWriter, r *http.Request) {

@@ -11,24 +11,19 @@ fetch('/api/auth/me').then(async r => {
 }).catch(() => { location.href = '/login'; });
 
 function init() {
-  applyTheme(localStorage.getItem('theme') || 'dark');
   loadLibraries();
   loadConversionJobs();
   setInterval(loadConversionJobs, 5000);
-  if (currentUser && currentUser.is_admin) {
-    document.getElementById('nav-users-link').hidden = false;
-    loadUsers();
-  }
+  loadUsers();
   showSettingsSection(location.hash.slice(1));
 }
 
 // ── Settings nav (one category visible at a time) ────────────────────────────
 
-const SETTINGS_SECTIONS = ['appearance', 'libraries', 'upload', 'users-section'];
+const SETTINGS_SECTIONS = ['libraries', 'upload', 'users-section'];
 
 function showSettingsSection(id) {
-  if (!SETTINGS_SECTIONS.includes(id)) id = 'appearance';
-  if (id === 'users-section' && !(currentUser && currentUser.is_admin)) id = 'appearance';
+  if (!SETTINGS_SECTIONS.includes(id)) id = 'libraries';
 
   document.querySelectorAll('.settings-section').forEach(sec => {
     sec.classList.toggle('active', sec.id === id);
@@ -51,20 +46,6 @@ document.querySelectorAll('.settings-nav-link').forEach(link => {
 document.getElementById('btn-logout').addEventListener('click', async () => {
   await fetch('/api/auth/logout', { method: 'POST' });
   location.href = '/login';
-});
-
-// ── Theme ─────────────────────────────────────────────────────────────────────
-
-function applyTheme(theme) {
-  document.documentElement.setAttribute('data-theme', theme);
-  localStorage.setItem('theme', theme);
-  document.querySelectorAll('.theme-opt').forEach(btn => {
-    btn.classList.toggle('active', btn.dataset.theme === theme);
-  });
-}
-
-document.querySelectorAll('.theme-opt').forEach(btn => {
-  btn.addEventListener('click', () => applyTheme(btn.dataset.theme));
 });
 
 // ── Libraries ─────────────────────────────────────────────────────────────────

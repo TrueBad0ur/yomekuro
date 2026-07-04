@@ -11,6 +11,22 @@ async function checkAuth() {
   return true;
 }
 
+// ── Theme ─────────────────────────────────────────────────────────────────────
+
+function applyTheme(theme) {
+  document.documentElement.setAttribute('data-theme', theme);
+  localStorage.setItem('theme', theme);
+  document.querySelectorAll('.theme-opt').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.theme === theme);
+  });
+}
+
+document.querySelectorAll('.theme-opt').forEach(btn => {
+  btn.addEventListener('click', () => applyTheme(btn.dataset.theme));
+});
+
+applyTheme(localStorage.getItem('theme') || 'dark');
+
 // ── Sidebar ───────────────────────────────────────────────────────────────────
 
 const sidebar      = document.getElementById('sidebar');
@@ -177,11 +193,16 @@ function renderBookGrid(books) {
         </div>
         ${progressHTML}
       </a>
-      <button class="book-tag-btn" data-id="${b.id}" title="Edit genres">⋯</button>`;
-    card.querySelector('.book-tag-btn').addEventListener('click', (e) => {
-      e.stopPropagation();
-      openTagEditor(b.id, b.title, e.currentTarget);
-    });
+      ${currentUser && currentUser.is_admin
+        ? `<button class="book-tag-btn" data-id="${b.id}" title="Edit genres">⋯</button>`
+        : ''}`;
+    const tagBtn = card.querySelector('.book-tag-btn');
+    if (tagBtn) {
+      tagBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        openTagEditor(b.id, b.title, e.currentTarget);
+      });
+    }
     grid.appendChild(card);
   }
 }
@@ -489,6 +510,10 @@ function esc(s) {
 
 checkAuth().then(ok => {
   if (!ok) return;
+  if (!currentUser.is_admin) {
+    const settingsLink = document.querySelector('.sidebar-footer .footer-link');
+    if (settingsLink) settingsLink.hidden = true;
+  }
   loadSeries();
   loadLibraries();
   loadTags();

@@ -226,6 +226,7 @@ body.page-library { display: flex; min-height: 100vh; }
 .breadcrumb-back:hover { text-decoration: underline; color: var(--accent); border-color: transparent; }
 .breadcrumb-sep { color: var(--text-dim); font-size: 0.88rem; }
 .view-title { font-size: 1rem; font-weight: 600; }
+.header-theme-switcher { margin-left: auto; flex-shrink: 0; }
 .cover-placeholder { width: 100%; aspect-ratio: 2/3; background: var(--border); }
 
 /* Filter bar (search + genre chips) */
@@ -441,6 +442,18 @@ body.page-reader { display: flex; flex-direction: column; min-height: 100vh; }
   transition: transform 0.25s ease;
 }
 .reader-nav.header-hidden { transform: translateY(-100%); }
+
+/* HTML-library content is never theme-aware — pin the (now-transparent)
+   chrome's text/buttons to the light palette always, since the book's own
+   background is virtually always light regardless of the site-wide theme. */
+body.html-reader-chrome .reader-nav,
+body.html-reader-chrome .reader-bottom-nav {
+  --text:       #1c1c1e;
+  --text-dim:   #74747c;
+  --accent:     #4568c4;
+  --accent-ink: #fff;
+  --border:     #e2e2e8;
+}
 .nav-home { flex-shrink: 0; font-size: 0.85rem; }
 .nav-title { flex: 1; font-size: 0.88rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .nav-info { flex-shrink: 0; font-size: 0.8rem; color: var(--text-dim); }

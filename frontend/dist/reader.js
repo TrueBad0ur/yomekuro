@@ -341,6 +341,8 @@ async function loadChapter(index, restoreScroll) {
   rewriteNodes(doc.body, chapterBase);
   content.innerHTML = doc.body.innerHTML;
 
+  if (manifest.format === 'html') matchChromeToContent();
+
   updateNav();
 
   requestAnimationFrame(() => requestAnimationFrame(() => {
@@ -403,6 +405,28 @@ function applyEpubStyles(doc, chapterBase) {
     el.className = 'epub-style';
     el.textContent = style.textContent;
     document.head.appendChild(el);
+  });
+}
+
+// Standalone HTML-library books bring their own CSS (unscoped, per
+// applyEpubStyles above), so the reader chrome's default --surface bars (and
+// their border line against --border) can clash hard with whatever
+// background the book actually renders on. Rather than guess a matching
+// color, just drop both entirely — buttons/title stay, they just float over
+// the content with no seam. Scroll-hide behavior (.header-hidden) is
+// untouched since that only toggles a transform.
+//
+// HTML-library content is never theme-aware (it's whatever colors the source
+// file hardcodes, almost always a light background) — so the chrome's own
+// text/button colors are pinned to the light theme's palette here too
+// (.html-reader-chrome in style.css), regardless of the site-wide dark/light
+// toggle. Otherwise dark mode's light button/text colors go unreadable
+// against that background once the bars themselves turn transparent.
+function matchChromeToContent() {
+  document.body.classList.add('html-reader-chrome');
+  document.querySelectorAll('.reader-nav, .reader-bottom-nav').forEach(el => {
+    el.style.backgroundColor = 'transparent';
+    el.style.borderColor = 'transparent';
   });
 }
 

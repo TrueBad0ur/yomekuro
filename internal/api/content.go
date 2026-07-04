@@ -129,6 +129,7 @@ func (c *zipCache) closeAll() {
 
 type manifestResponse struct {
 	Title            string         `json:"title"`
+	Format           string         `json:"format"`
 	ReadingDirection string         `json:"reading_direction"`
 	FixedLayout      bool           `json:"fixed_layout"`
 	Spine            []spineItemDTO `json:"spine"`
@@ -158,6 +159,7 @@ func (s *Server) getBookManifest(w http.ResponseWriter, r *http.Request) {
 	if b.Format == "html" {
 		respond(w, manifestResponse{
 			Title:            b.Title,
+			Format:           b.Format,
 			ReadingDirection: b.ReadingDirection,
 			FixedLayout:      false,
 			Spine:            []spineItemDTO{{Href: b.Filename, MediaType: "text/html; charset=utf-8"}},
@@ -178,6 +180,7 @@ func (s *Server) getBookManifest(w http.ResponseWriter, r *http.Request) {
 	}
 	respond(w, manifestResponse{
 		Title:            b.Title,
+		Format:           b.Format,
 		ReadingDirection: b.ReadingDirection,
 		FixedLayout:      fixedLayout,
 		Spine:            spineDTO,
