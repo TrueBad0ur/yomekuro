@@ -19,6 +19,11 @@ Mounts `./library` (EPUB/manga) and `./html-library` (standalone `.html` files) 
 both are registered and scanned automatically on boot. Open http://localhost:8080
 and log in.
 
+This also brings up the converter services (`converter`, `converter-gpu`,
+`converter-worker` — see "Converter" below) via `docker-compose.yml`'s
+`include:`. `converter/docker-compose.yml` still works standalone if you only
+want the converter without yomekuro.
+
 ---
 
 ## .env
@@ -69,10 +74,35 @@ run it locally via `docker compose`, don't push it multi-arch.
 ## Converter (manga OCR → EPUB)
 
 Uses [mokuro](https://github.com/kha-white/mokuro) for Japanese text detection.
-`docker-compose.yml` defines two services: `converter` (CPU, default) and
-`converter-gpu` (AMD ROCm).
+`converter/docker-compose.yml` defines three services: `converter` (CPU,
+one-shot CLI), `converter-gpu` (AMD ROCm, one-shot CLI), and `converter-worker`
+(AMD ROCm, persistent — drains the upload queue below).
 
-### Input layout
+### Upload via UI (recommended)
+
+Settings → Upload manga: pick a library, an archive (`.zip`/`.tar`/`.tar.gz`/
+`.tar.xz`/`.7z`) of raw page images, and a name. yomekuro extracts it into
+`<library>/<name>-in/`, strips OS junk (`.DS_Store`, `__MACOSX/`, `._*` — common
+in macOS-made archives), and queues a row in Postgres (`conversion_jobs`
+table). `converter-worker` picks it up, runs OCR on GPU, and writes EPUBs to
+`<library>/<name>/` — picked up by the next library scan automatically. Job
+status is polled in the same Settings page.
+
+This needs `./library` mounted read-write (it is, by default) — the extraction
+step writes into it.
+
+### Manual folders
+
+Dropping a pre-staged `<name>-in/` folder into the library by hand (no upload)
+also works — `converter-worker` polls for these too and converts them the same
+way, skipping ones already fully converted. Useful for content prepared some
+other way, or moved in from elsewhere.
+
+### CLI (manual one-shot runs)
+
+For ad-hoc runs outside the upload flow.
+
+#### Input layout
 
 One subfolder per volume (each becomes its own EPUB):
 
@@ -94,7 +124,7 @@ library/One-Shot Story/
   002.jpg
 ```
 
-### Run
+#### Run
 
 ```bash
 # all volumes (CPU)
@@ -139,14 +169,18 @@ generation) works in practice. Don't override across RDNA generations.
 
 ## Libraries
 
-`docker-compose.yml` mounts two read-only volumes, both auto-registered and
-scanned on boot — no manual "add library" step needed:
+`docker-compose.yml` mounts two volumes, both auto-registered and scanned on
+boot — no manual "add library" step needed:
 
 ```yaml
 volumes:
-  - ./library:/library:ro           # EPUB / manga, one folder per series
-  - ./html-library:/html-library:ro # standalone .html files, one file = one book
+  - ./library:/library               # EPUB / manga, one folder per series
+  - ./html-library:/html-library:ro  # standalone .html files, one file = one book
 ```
+
+`./library` is read-write (not `:ro`) because the manga upload feature
+extracts archives into it directly; `./html-library` stays read-only since
+nothing writes to it.
 
 HTML book titles come from `<title>`, with optional
 `<meta name="author" content="...">` and

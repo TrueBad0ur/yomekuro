@@ -13,11 +13,38 @@ fetch('/api/auth/me').then(async r => {
 function init() {
   applyTheme(localStorage.getItem('theme') || 'dark');
   loadLibraries();
+  loadConversionJobs();
+  setInterval(loadConversionJobs, 5000);
   if (currentUser && currentUser.is_admin) {
-    document.getElementById('users-section').hidden = false;
+    document.getElementById('nav-users-link').hidden = false;
     loadUsers();
   }
+  showSettingsSection(location.hash.slice(1));
 }
+
+// ── Settings nav (one category visible at a time) ────────────────────────────
+
+const SETTINGS_SECTIONS = ['appearance', 'libraries', 'upload', 'users-section'];
+
+function showSettingsSection(id) {
+  if (!SETTINGS_SECTIONS.includes(id)) id = 'appearance';
+  if (id === 'users-section' && !(currentUser && currentUser.is_admin)) id = 'appearance';
+
+  document.querySelectorAll('.settings-section').forEach(sec => {
+    sec.classList.toggle('active', sec.id === id);
+  });
+  document.querySelectorAll('.settings-nav-link').forEach(link => {
+    link.classList.toggle('active', link.getAttribute('href') === '#' + id);
+  });
+  history.replaceState(null, '', '#' + id);
+}
+
+document.querySelectorAll('.settings-nav-link').forEach(link => {
+  link.addEventListener('click', (e) => {
+    e.preventDefault();
+    showSettingsSection(link.getAttribute('href').slice(1));
+  });
+});
 
 // ── Logout ────────────────────────────────────────────────────────────────────
 
@@ -53,6 +80,13 @@ async function loadLibraries() {
   }
 
   list.innerHTML = '';
+
+  const librarySelect = document.getElementById('upload-library');
+  if (librarySelect) {
+    librarySelect.innerHTML = (libs.items || [])
+      .map(l => `<option value="${l.id}">${esc(l.name)}</option>`).join('');
+  }
+
   for (const lib of (libs.items || [])) {
     const card = document.createElement('div');
     card.className = 'library-card';
@@ -124,6 +158,125 @@ document.getElementById('btn-add-library').addEventListener('click', async () =>
     // Auto-trigger scan after adding
     fetch(`/api/libraries/${lib.id}/scan`, { method: 'POST' }).catch(() => {});
   } finally {
+    btn.disabled = false;
+  }
+});
+
+// ── Manga upload + conversion jobs ──────────────────────────────────────────────
+
+const uploadProgressRow   = document.getElementById('upload-progress-row');
+const uploadProgressFill  = document.getElementById('upload-progress-fill');
+const uploadProgressLabel = document.getElementById('upload-progress-label');
+
+function setUploadProgress(pct, label, indeterminate) {
+  uploadProgressRow.hidden = false;
+  uploadProgressFill.classList.toggle('indeterminate', !!indeterminate);
+  uploadProgressFill.style.width = indeterminate ? '' : pct + '%';
+  uploadProgressLabel.textContent = label;
+}
+
+function hideUploadProgress() {
+  uploadProgressRow.hidden = true;
+  uploadProgressFill.classList.remove('indeterminate');
+  uploadProgressFill.style.width = '0%';
+}
+
+document.getElementById('btn-upload').addEventListener('click', () => {
+  const errEl = document.getElementById('upload-error');
+  errEl.hidden = true;
+  const libraryId = document.getElementById('upload-library').value;
+  const name = document.getElementById('upload-name').value.trim();
+  const fileInput = document.getElementById('upload-file');
+  const file = fileInput.files[0];
+  if (!libraryId || !file) {
+    errEl.textContent = 'Pick a library and a file';
+    errEl.hidden = false;
+    return;
+  }
+
+  const form = new FormData();
+  form.append('library_id', libraryId);
+  if (name) form.append('name', name);
+  form.append('file', file);
+
+  const btn = document.getElementById('btn-upload');
+  btn.disabled = true;
+  setUploadProgress(0, 'Uploading… 0%', false);
+
+  const xhr = new XMLHttpRequest();
+  xhr.open('POST', '/api/converter/upload');
+
+  xhr.upload.addEventListener('progress', (e) => {
+    if (!e.lengthComputable) return;
+    const pct = Math.round((e.loaded / e.total) * 100);
+    setUploadProgress(pct, `Uploading… ${pct}%`, false);
+  });
+
+  xhr.upload.addEventListener('load', () => {
+    // Transfer done; server is now extracting the archive and queuing the
+    // job (no byte-level progress for that part) — show a moving bar instead
+    // of a stalled 100% one.
+    setUploadProgress(100, 'Extracting archive…', true);
+  });
+
+  xhr.addEventListener('load', () => {
+    btn.disabled = false;
+    if (xhr.status >= 200 && xhr.status < 300) {
+      hideUploadProgress();
+      document.getElementById('upload-name').value = '';
+      fileInput.value = '';
+      loadConversionJobs();
+      return;
+    }
+    hideUploadProgress();
+    let msg = 'Upload failed';
+    try { msg = JSON.parse(xhr.responseText).error || msg; } catch {}
+    errEl.textContent = msg;
+    errEl.hidden = false;
+  });
+
+  xhr.addEventListener('error', () => {
+    btn.disabled = false;
+    hideUploadProgress();
+    errEl.textContent = 'Upload failed';
+    errEl.hidden = false;
+  });
+
+  xhr.send(form);
+});
+
+async function loadConversionJobs() {
+  const list = document.getElementById('conversion-jobs');
+  let data;
+  try {
+    data = await fetch('/api/converter/jobs').then(r => r.json());
+  } catch {
+    return;
+  }
+  const jobs = data.items || [];
+  if (jobs.length === 0) {
+    list.innerHTML = '';
+    return;
+  }
+  list.innerHTML = jobs.map(j => `
+    <div class="library-card">
+      <div class="library-card-name">${esc(j.name)}</div>
+      <div class="library-card-footer">
+        <span class="library-card-count job-status-${esc(j.status)}">${esc(j.status)}</span>
+        ${j.error ? `<span style="color:#e07070;font-size:.78rem">${esc(j.error)}</span>` : ''}
+        <button class="job-delete-btn" data-id="${esc(j.id)}" title="Remove from list">Delete</button>
+      </div>
+    </div>`).join('');
+}
+
+document.getElementById('conversion-jobs').addEventListener('click', async (e) => {
+  const btn = e.target.closest('.job-delete-btn');
+  if (!btn) return;
+  btn.disabled = true;
+  try {
+    await fetch(`/api/converter/jobs/${btn.dataset.id}`, { method: 'DELETE' });
+    loadConversionJobs();
+  } catch {
     btn.disabled = false;
   }
 });

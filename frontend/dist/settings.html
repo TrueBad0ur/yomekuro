@@ -20,48 +20,78 @@
     <button id="btn-logout" class="logout-btn">Logout</button>
   </header>
 
-  <main class="settings-page-main">
+  <div class="settings-layout">
+    <nav class="settings-nav">
+      <a href="#appearance" class="settings-nav-link active">Appearance</a>
+      <a href="#libraries" class="settings-nav-link">Libraries</a>
+      <a href="#upload" class="settings-nav-link">Upload manga</a>
+      <a href="#users-section" class="settings-nav-link" id="nav-users-link" hidden>Users</a>
+    </nav>
 
-    <section class="settings-section">
-      <h2 class="settings-section-title">Appearance</h2>
-      <div class="settings-row">
-        <span class="settings-row-label">Theme</span>
-        <div class="theme-switcher">
-          <button class="theme-opt" data-theme="dark"  id="btn-dark">Dark</button>
-          <button class="theme-opt" data-theme="light" id="btn-light">Light</button>
+    <main class="settings-page-main">
+
+      <section class="settings-section" id="appearance">
+        <h2 class="settings-section-title">Appearance</h2>
+        <div class="settings-row">
+          <span class="settings-row-label">Theme</span>
+          <div class="theme-switcher">
+            <button class="theme-opt" data-theme="dark"  id="btn-dark">Dark</button>
+            <button class="theme-opt" data-theme="light" id="btn-light">Light</button>
+          </div>
         </div>
-      </div>
-    </section>
+      </section>
 
-    <section class="settings-section">
-      <h2 class="settings-section-title">Libraries</h2>
-      <div id="libraries-list" class="settings-libraries">
-        <p style="color:var(--text-dim);font-size:.88rem">Loading…</p>
-      </div>
-      <div class="settings-row" style="margin-top:.75rem;gap:.5rem;flex-wrap:wrap">
-        <input id="lib-name" type="text" placeholder="Name" class="user-input">
-        <input id="lib-path" type="text" placeholder="Path (e.g. /library)" class="user-input" style="flex:2">
-        <button id="btn-add-library">Add Library</button>
-        <p class="login-error" id="add-library-error" hidden></p>
-      </div>
-    </section>
+      <section class="settings-section" id="libraries">
+        <h2 class="settings-section-title">Libraries</h2>
+        <div id="libraries-list" class="settings-libraries">
+          <p style="color:var(--text-dim);font-size:.88rem">Loading…</p>
+        </div>
+        <div class="settings-row" style="margin-top:.75rem;gap:.5rem;flex-wrap:wrap">
+          <input id="lib-name" type="text" placeholder="Name" class="user-input">
+          <input id="lib-path" type="text" placeholder="Path (e.g. /library)" class="user-input" style="flex:2">
+          <button id="btn-add-library">Add Library</button>
+          <p class="login-error" id="add-library-error" hidden></p>
+        </div>
+      </section>
 
-    <!-- Admin only -->
-    <section class="settings-section" id="users-section" hidden>
-      <h2 class="settings-section-title">Users</h2>
-      <div id="users-list" class="settings-users"></div>
-      <div class="settings-row user-create-form" style="margin-top:.75rem;gap:.5rem;flex-wrap:wrap">
-        <input id="new-username" type="text" placeholder="Username" class="user-input">
-        <input id="new-password" type="password" placeholder="Password" class="user-input">
-        <label class="user-admin-label">
-          <input id="new-is-admin" type="checkbox"> Admin
-        </label>
-        <button id="btn-create-user">Add user</button>
-        <p class="login-error" id="create-user-error" hidden></p>
-      </div>
-    </section>
+      <section class="settings-section" id="upload">
+        <h2 class="settings-section-title">Upload manga</h2>
+        <p style="color:var(--text-dim);font-size:.82rem;margin:0 0 .6rem">
+          Upload a .zip/.tar/.tar.gz/.tar.xz/.7z of raw manga page images (one subfolder
+          per volume, or images directly for a single volume). It's extracted, queued for
+          GPU OCR conversion, and the resulting EPUBs appear in the library once done.
+        </p>
+        <div class="settings-row" style="gap:.5rem;flex-wrap:wrap">
+          <select id="upload-library" class="user-input"></select>
+          <input id="upload-name" type="text" placeholder="Name (optional, from filename)" class="user-input">
+          <input id="upload-file" type="file" accept=".zip,.tar,.tar.gz,.tgz,.tar.xz,.txz,.7z">
+          <button id="btn-upload">Upload</button>
+          <p class="login-error" id="upload-error" hidden></p>
+        </div>
+        <div id="upload-progress-row" class="upload-progress-row" hidden>
+          <div class="upload-progress-bar"><div id="upload-progress-fill" class="upload-progress-fill"></div></div>
+          <span id="upload-progress-label" class="upload-progress-label"></span>
+        </div>
+        <div id="conversion-jobs" class="settings-libraries" style="margin-top:.75rem"></div>
+      </section>
 
-  </main>
+      <!-- Admin only -->
+      <section class="settings-section" id="users-section">
+        <h2 class="settings-section-title">Users</h2>
+        <div id="users-list" class="settings-users"></div>
+        <div class="settings-row user-create-form" style="margin-top:.75rem;gap:.5rem;flex-wrap:wrap">
+          <input id="new-username" type="text" placeholder="Username" class="user-input">
+          <input id="new-password" type="password" placeholder="Password" class="user-input">
+          <label class="user-admin-label">
+            <input id="new-is-admin" type="checkbox"> Admin
+          </label>
+          <button id="btn-create-user">Add user</button>
+          <p class="login-error" id="create-user-error" hidden></p>
+        </div>
+      </section>
+
+    </main>
+  </div>
 
   <script src="/settings.js"></script>
 </body>

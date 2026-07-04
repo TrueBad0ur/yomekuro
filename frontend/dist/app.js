@@ -314,7 +314,7 @@ async function openTagEditor(bookId, bookTitle, anchorEl) {
 async function loadSeries() {
   let data;
   try {
-    data = await fetch('/api/series').then(r => r.json());
+    data = await fetch('/api/series?exclude_html=1').then(r => r.json());
   } catch {
     allSeries = [];
     showTitles();

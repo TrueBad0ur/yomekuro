@@ -12,7 +12,7 @@ type Series struct {
 	CoverBookID [16]byte
 }
 
-func ListSeries(ctx context.Context, pool *pgxpool.Pool, libraryID string) ([]Series, error) {
+func ListSeries(ctx context.Context, pool *pgxpool.Pool, libraryID string, excludeHTML bool) ([]Series, error) {
 	where := "series_name != '' AND series_name IS NOT NULL"
 	args := []any{}
 
@@ -21,6 +21,9 @@ func ListSeries(ctx context.Context, pool *pgxpool.Pool, libraryID string) ([]Se
 			where += " AND library_id = $1"
 			args = append(args, id)
 		}
+	}
+	if excludeHTML {
+		where += " AND format != 'html'"
 	}
 
 	rows, err := pool.Query(ctx, `

@@ -3,7 +3,7 @@
 # driver + /dev/kfd + /dev/dri passthrough). No NVIDIA/CUDA support.
 FROM golang:1.26-alpine AS builder
 WORKDIR /app
-COPY go.mod ./
+COPY go.mod go.sum ./
 RUN go mod download
 COPY *.go ./
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
@@ -38,7 +38,13 @@ RUN pip install --no-cache-dir \
     --index-url https://download.pytorch.org/whl/rocm6.4
 
 COPY mokuro/ /mokuro/
-RUN pip install --no-cache-dir /mokuro && \
+# transformers>=5.13.0 broke loading manga-ocr-base's (BertJapaneseTokenizer)
+# tokenizer entirely — "Couldn't instantiate the backend tokenizer" even with
+# sentencepiece installed. mokuro pins no upper bound, so an unpinned install
+# silently picks up the regression on any rebuild after it was published.
+# 5.12.1 is the last version confirmed working; sentencepiece is kept as a
+# harmless belt-and-suspenders in case a future pin still needs it.
+RUN pip install --no-cache-dir /mokuro sentencepiece "transformers==5.12.1" && \
     cp -r /mokuro/mokuro/assets \
       "$(python3 -c 'import importlib.util,pathlib; print(pathlib.Path(importlib.util.find_spec("mokuro").origin).parent)')"
 

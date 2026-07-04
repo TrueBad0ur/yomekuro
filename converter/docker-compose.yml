@@ -11,6 +11,34 @@ services:
       # re-downloads on every fresh container.
       - ./data/manga-ocr-cache:/root/.cache/manga-ocr
 
+  # Persistent GPU worker for uploads made through the yomekuro UI: drains the
+  # conversion_jobs table in yomekuro's Postgres (see root docker-compose.yml,
+  # brought in here via `include:`) and also polls /library for manually
+  # created "<name>-in/" folders (not from an upload — see watch.go).
+  # Independent of the one-shot `converter`/`converter-gpu` services above,
+  # which stay CLI-driven for manual `docker compose run` conversions.
+  converter-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.gpu
+    command: ["--watch", "--library", "/library"]
+    restart: unless-stopped
+    devices:
+      - /dev/dri:/dev/dri
+      - /dev/kfd:/dev/kfd
+    group_add:
+      - "44"   # video
+      - "992"  # render
+    environment:
+      HSA_OVERRIDE_GFX_VERSION: "10.3.0"
+      ROCR_VISIBLE_DEVICES: "0"
+      HIP_VISIBLE_DEVICES: "0"
+      CONVERTER_DB: "postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}?sslmode=disable"
+    volumes:
+      - ../library:/library
+      - ./data/hf-cache:/root/.cache/huggingface
+      - ./data/manga-ocr-cache:/root/.cache/manga-ocr
+
   converter-gpu:
     build:
       context: .

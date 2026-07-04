@@ -50,6 +50,10 @@ func NewRouter(pool *pgxpool.Pool, sc *scanner.Scanner, w *scanner.Watcher, data
 		r.Delete("/api/libraries/{id}", s.deleteLibrary)
 		r.Post("/api/libraries/{id}/scan", s.triggerScan)
 
+		r.Post("/api/converter/upload", s.uploadArchive)
+		r.Get("/api/converter/jobs", s.listConversionJobs)
+		r.Delete("/api/converter/jobs/{id}", s.deleteConversionJob)
+
 		r.Get("/api/books", s.listBooks)
 		r.Get("/api/books/{id}", s.getBook)
 		r.Get("/api/books/{id}/cover", s.getBookCover)

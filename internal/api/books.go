@@ -189,7 +189,8 @@ func (s *Server) getBookFile(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) listSeries(w http.ResponseWriter, r *http.Request) {
-	series, err := db.ListSeries(r.Context(), s.db, r.URL.Query().Get("library"))
+	excludeHTML := r.URL.Query().Get("exclude_html") == "1"
+	series, err := db.ListSeries(r.Context(), s.db, r.URL.Query().Get("library"), excludeHTML)
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, err.Error())
 		return
