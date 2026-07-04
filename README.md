@@ -115,7 +115,26 @@ The tag name itself becomes the image tag, whatever it is — there's no `v`
 prefix convention enforced. Builds use GitHub Actions' layer cache
 (`cache-from`/`cache-to: type=gha`) scoped per image, so re-running the
 workflow (e.g. after a transient failure) doesn't rebuild layers that didn't
-change.
+change. Before any image is built, a `test` job reruns `test.yml`
+(gofmt/vet/build/test/golangci-lint for both modules) — a tag whose commit
+fails that never gets published.
+
+**Common release commands:**
+
+```bash
+# new commit, push, and tag it in one go
+git add -A && git commit -m "msg" && git push origin main && git tag 2.2 && git push origin 2.2
+
+# tag whatever's already on main (no new commit)
+git fetch origin main && git tag 2.2 origin/main && git push origin 2.2
+
+# amend the current commit, force-push main, move an existing tag onto it
+git add . && git commit --amend --no-edit && git push origin main -f && git tag -f 2.1 && git push origin 2.1 -f
+```
+
+`git tag <name>` makes a lightweight tag — `git push origin <name>` (by name)
+always pushes it, but `git push --follow-tags` silently skips lightweight tags
+(it only follows annotated ones, `git tag -a`), so push tags by name explicitly.
 
 **Required secrets**, in the `prod` GitHub Environment (Settings → Environments
 → `prod` → Environment secrets — not repository-level secrets; the build jobs
