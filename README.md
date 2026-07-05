@@ -23,14 +23,18 @@ from Docker Hub:
 
 ```bash
 cp .env.example .env
-# edit .env — set POSTGRES_PASSWORD, YOMEKURO_ADMIN_PASSWORD, and
-# YOMEKURO_VERSION (the tag to pull, e.g. 2.0)
+# edit .env — set POSTGRES_PASSWORD, YOMEKURO_ADMIN_PASSWORD, and the two
+# image tags to pull: YOMEKURO_VERSION and CONVERTER_VERSION
 
 docker compose -f docker-compose.prod.yml pull
 docker compose -f docker-compose.prod.yml up -d
 ```
 
-See "Releasing" below for how versions get published to Docker Hub.
+`yomekuro` and `converter` are versioned and pushed independently (`YOMEKURO_VERSION`
+picks `truebad0ur/yomekuro:<tag>`, `CONVERTER_VERSION` picks
+`truebad0ur/converter:gpu-<tag>`) — bump one without forcing a rebuild/pull of the
+other when only one side actually changed. See "Releasing" below for how versions
+get published to Docker Hub.
 
 Mounts a single `./library` — with three subfolders inside, `ranobe/`, `manga/`,
 and `html/` (one series per subfolder of those, `.epub` files inside; `html/`
@@ -137,6 +141,19 @@ git add . && git commit --amend --no-edit && git push origin main -f && git tag 
 `git tag <name>` makes a lightweight tag — `git push origin <name>` (by name)
 always pushes it, but `git push --follow-tags` silently skips lightweight tags
 (it only follows annotated ones, `git tag -a`), so push tags by name explicitly.
+
+**Bumping just one image manually:** the CI flow above always publishes all
+three images under one shared tag, which is right for a coordinated release.
+If only `yomekuro` changed (or only `converter`), there's no need to force a
+matching version bump on the other side — build and push that one image by
+hand under its own new tag, then point only its `.env` variable
+(`YOMEKURO_VERSION` or `CONVERTER_VERSION`) at it:
+
+```bash
+docker build -t truebad0ur/yomekuro:2.3.3 .
+docker push truebad0ur/yomekuro:2.3.3
+# .env: YOMEKURO_VERSION=2.3.3 (CONVERTER_VERSION stays wherever it was)
+```
 
 **Required secrets**, in the `prod` GitHub Environment (Settings → Environments
 → `prod` → Environment secrets — not repository-level secrets; the build jobs
