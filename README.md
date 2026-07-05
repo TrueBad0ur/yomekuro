@@ -32,9 +32,11 @@ docker compose -f docker-compose.prod.yml up -d
 
 See "Releasing" below for how versions get published to Docker Hub.
 
-Mounts `./library` (EPUB/manga) and `./html-library` (standalone `.html` files) —
-both are registered and scanned automatically on boot. Open http://localhost:8080
-and log in.
+Mounts a single `./library` — with three subfolders inside, `ranobe/`, `manga/`,
+and `html/` (one series per subfolder of those, `.epub` files inside; `html/`
+holds standalone `.html` files, one file = one book). All three are registered
+as separate libraries and scanned automatically on boot. Open
+http://localhost:8080 and log in.
 
 The dev compose also brings up the converter services (`converter`,
 `converter-gpu`, `converter-worker` — see "Converter" below) via
@@ -185,7 +187,7 @@ For ad-hoc runs outside the upload flow.
 One subfolder per volume (each becomes its own EPUB):
 
 ```
-library/test/
+library/manga/test-in/
   Dungeon Meshi v01/
     001.jpg
     002.jpg
@@ -197,7 +199,7 @@ Or point `--input` straight at a folder of images with no subfolders — it's
 treated as a single volume/EPUB, named after the folder:
 
 ```
-library/One-Shot Story/
+library/manga/One-Shot Story-in/
   001.jpg
   002.jpg
 ```
@@ -207,15 +209,15 @@ library/One-Shot Story/
 ```bash
 # all volumes (CPU)
 docker compose -f converter/docker-compose.yml run --rm converter \
-  --input /library/test --output /library/Manga
+  --input /library/manga/test-in --output /library/manga/test
 
 # same, on GPU
 docker compose -f converter/docker-compose.yml run --rm converter-gpu \
-  --input /library/test --output /library/Manga
+  --input /library/manga/test-in --output /library/manga/test
 
 # single volume, force re-run
 docker compose -f converter/docker-compose.yml run --rm converter \
-  --input /library/test --output /library/Manga \
+  --input /library/manga/test-in --output /library/manga/test \
   --volume "Dungeon Meshi v01" --no-cache
 ```
 
@@ -247,18 +249,25 @@ generation) works in practice. Don't override across RDNA generations.
 
 ## Libraries
 
-`docker-compose.yml` mounts two volumes, both auto-registered and scanned on
-boot — no manual "add library" step needed:
+`docker-compose.yml` mounts a single volume:
 
 ```yaml
 volumes:
-  - ./library:/library               # EPUB / manga, one folder per series
-  - ./html-library:/html-library:ro  # standalone .html files, one file = one book
+  - ./library:/library
 ```
 
-`./library` is read-write (not `:ro`) because the manga upload feature
-extracts archives into it directly; `./html-library` stays read-only since
-nothing writes to it.
+Inside it, three subfolders are each auto-registered as their own library and
+scanned on boot — no manual "add library" step needed:
+
+```
+library/
+  ranobe/   # light novel EPUBs, one folder per series
+  manga/    # manga EPUBs (converter output or your own), one folder per series
+  html/     # standalone .html files, one file = one book
+```
+
+The whole `./library` mount is read-write (not `:ro`) because the manga
+upload feature extracts archives directly into `library/manga/`.
 
 HTML book titles come from `<title>`, with optional
 `<meta name="author" content="...">` and

@@ -44,13 +44,19 @@ func main() {
 		slog.Warn("YOMEKURO_ADMIN_PASSWORD not set — admin will not be created automatically")
 	}
 
-	if _, err := db.EnsureDefaultLibrary(ctx, pool, "Library", "/library"); err != nil {
-		slog.Error("EnsureDefaultLibrary", "err", err)
-		os.Exit(1)
-	}
-	if _, err := db.EnsureDefaultLibrary(ctx, pool, "HTML Library", "/html-library"); err != nil {
-		slog.Error("EnsureDefaultLibrary", "err", err)
-		os.Exit(1)
+	// All three live under the single /library mount, one subfolder each —
+	// ranobe/manga split is purely organizational (same epub scan path either
+	// way), html is the standalone-HTML-file collection formerly mounted
+	// separately at /html-library.
+	for _, def := range []struct{ name, path string }{
+		{"Ranobe", "/library/ranobe"},
+		{"Manga", "/library/manga"},
+		{"HTML", "/library/html"},
+	} {
+		if _, err := db.EnsureDefaultLibrary(ctx, pool, def.name, def.path); err != nil {
+			slog.Error("EnsureDefaultLibrary", "err", err)
+			os.Exit(1)
+		}
 	}
 
 	sc := scanner.New(pool, cfg.Data)
