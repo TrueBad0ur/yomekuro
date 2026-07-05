@@ -43,7 +43,7 @@ services:
   # converter/docker-compose.yml (dev) for the equivalent build-based service
   # and its comments on device/group_add requirements (AMD ROCm host).
   converter-worker:
-    image: truebad0ur/converter:gpu-${YOMEKURO_VERSION}
+    image: truebad0ur/converter:gpu-${CONVERTER_VERSION}
     command: ["--watch", "--library", "/library"]
     restart: unless-stopped
     depends_on:
