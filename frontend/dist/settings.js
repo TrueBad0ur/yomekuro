@@ -13,7 +13,11 @@ fetch('/api/auth/me').then(async r => {
 function init() {
   loadLibraries();
   loadConversionJobs();
-  setInterval(loadConversionJobs, 5000);
+  fetch('/api/config').then(r => r.json()).then(cfg => {
+    setInterval(loadConversionJobs, cfg.jobs_poll_interval_ms || 20000);
+  }).catch(() => {
+    setInterval(loadConversionJobs, 20000);
+  });
   loadUsers();
   showSettingsSection(location.hash.slice(1));
 }
@@ -210,6 +214,8 @@ document.getElementById('btn-upload').addEventListener('click', () => {
       return;
     }
     hideUploadProgress();
+    document.getElementById('upload-name').value = '';
+    fileInput.value = '';
     let msg = 'Upload failed';
     try { msg = JSON.parse(xhr.responseText).error || msg; } catch {}
     errEl.textContent = msg;
@@ -219,6 +225,8 @@ document.getElementById('btn-upload').addEventListener('click', () => {
   xhr.addEventListener('error', () => {
     btn.disabled = false;
     hideUploadProgress();
+    document.getElementById('upload-name').value = '';
+    fileInput.value = '';
     errEl.textContent = 'Upload failed';
     errEl.hidden = false;
   });

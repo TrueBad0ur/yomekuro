@@ -13,20 +13,22 @@ import (
 )
 
 type Server struct {
-	db      *pgxpool.Pool
-	scanner *scanner.Scanner
-	watcher *scanner.Watcher
-	dataDir string
-	zips    *zipCache
+	db                 *pgxpool.Pool
+	scanner            *scanner.Scanner
+	watcher            *scanner.Watcher
+	dataDir            string
+	zips               *zipCache
+	jobsPollIntervalMS int
 }
 
-func NewRouter(pool *pgxpool.Pool, sc *scanner.Scanner, w *scanner.Watcher, dataDir string) http.Handler {
+func NewRouter(pool *pgxpool.Pool, sc *scanner.Scanner, w *scanner.Watcher, dataDir string, zipCacheSize, jobsPollIntervalMS int) http.Handler {
 	s := &Server{
-		db:      pool,
-		scanner: sc,
-		watcher: w,
-		dataDir: dataDir,
-		zips:    newZipCache(20),
+		db:                 pool,
+		scanner:            sc,
+		watcher:            w,
+		dataDir:            dataDir,
+		zips:               newZipCache(zipCacheSize),
+		jobsPollIntervalMS: jobsPollIntervalMS,
 	}
 
 	r := chi.NewRouter()
@@ -45,6 +47,7 @@ func NewRouter(pool *pgxpool.Pool, sc *scanner.Scanner, w *scanner.Watcher, data
 
 		r.Post("/api/auth/logout", s.logout)
 		r.Get("/api/auth/me", s.me)
+		r.Get("/api/config", s.getConfig)
 
 		r.Get("/api/libraries", s.listLibraries)
 
@@ -107,6 +110,13 @@ func NewRouter(pool *pgxpool.Pool, sc *scanner.Scanner, w *scanner.Watcher, data
 	r.Handle("/*", fileServer)
 
 	return r
+}
+
+// getConfig exposes server-side-configurable values the frontend needs but
+// can't read from the container's own environment (it's static JS shipped to
+// the browser, not a process inside the container).
+func (s *Server) getConfig(w http.ResponseWriter, r *http.Request) {
+	respond(w, map[string]any{"jobs_poll_interval_ms": s.jobsPollIntervalMS})
 }
 
 func (s *Server) health(w http.ResponseWriter, r *http.Request) {

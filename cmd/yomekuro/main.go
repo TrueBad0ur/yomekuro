@@ -44,10 +44,7 @@ func main() {
 		slog.Warn("YOMEKURO_ADMIN_PASSWORD not set — admin will not be created automatically")
 	}
 
-	// All three live under the single /library mount, one subfolder each —
-	// ranobe/manga split is purely organizational (same epub scan path either
-	// way), html is the standalone-HTML-file collection formerly mounted
-	// separately at /html-library.
+	// All three live under one /library mount, one subfolder each.
 	for _, def := range []struct{ name, path string }{
 		{"Ranobe", "/library/ranobe"},
 		{"Manga", "/library/manga"},
@@ -84,7 +81,7 @@ func main() {
 		}
 	}
 
-	router := api.NewRouter(pool, sc, watcher, cfg.Data)
+	router := api.NewRouter(pool, sc, watcher, cfg.Data, cfg.ZipCacheSize, cfg.JobsPollIntervalMS)
 
 	slog.Info("yomekuro listening", "addr", cfg.Addr)
 	if err := http.ListenAndServe(cfg.Addr, router); err != nil {

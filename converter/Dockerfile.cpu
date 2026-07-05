@@ -26,12 +26,8 @@ RUN pip install --no-cache-dir \
     --index-url https://download.pytorch.org/whl/cpu
 
 COPY mokuro/ /mokuro/
-# transformers>=5.13.0 broke loading manga-ocr-base's (BertJapaneseTokenizer)
-# tokenizer entirely — "Couldn't instantiate the backend tokenizer" even with
-# sentencepiece installed. mokuro pins no upper bound, so an unpinned install
-# silently picks up the regression on any rebuild after it was published.
-# 5.12.1 is the last version confirmed working; sentencepiece is kept as a
-# harmless belt-and-suspenders in case a future pin still needs it.
+# transformers>=5.13.0 breaks loading manga-ocr-base's tokenizer; 5.12.1 is the
+# last version confirmed working.
 RUN pip install --no-cache-dir /mokuro sentencepiece "transformers==5.12.1" && \
     cp -r /mokuro/mokuro/assets \
       "$(python3 -c 'import importlib.util,pathlib; print(pathlib.Path(importlib.util.find_spec("mokuro").origin).parent)')"

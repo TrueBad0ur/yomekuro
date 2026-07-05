@@ -1,5 +1,7 @@
 # yomekuro
 
+[Русский](README-russian.md)
+
 Self-hosted EPUB library for Japanese light novels and manga. Single binary + PostgreSQL. No OAuth, no external metadata providers — everything from EPUB files directly.
 
 Includes a companion **converter** that turns manga image folders into fixed-layout EPUBs with OCR text overlay for [Yomitan](https://github.com/themoeway/yomitan).
@@ -49,6 +51,46 @@ works standalone if you only want the converter without yomekuro.
 
 ---
 
+## Using yomekuro
+
+### Library page
+
+The home page lists your series as cover-art tiles, grouped by library
+(Ranobe / Manga / HTML) in the sidebar. Click a series to see its books,
+click a book to start reading. Search and genre/tag filters are in the
+header; admins get an extra button on each book to edit its tags.
+
+![Library page](docs/screenshots/library.png)
+
+### Reading
+
+Manga opens in fixed-layout page view (with a **Spread** toggle for
+two-page spreads); novels open in a scrolling or vertical (RTL) layout.
+Yomitan works directly against the OCR text overlay on manga pages — no
+iframe getting in the way. See [Reader](#reader) below for keyboard
+shortcuts.
+
+![Reader](docs/screenshots/reader.png)
+
+### Settings (admin only)
+
+Regular users only get the theme toggle and logout button in the header.
+Admins additionally get a Settings page for managing libraries, users, and
+uploading manga for OCR conversion.
+
+![Settings page](docs/screenshots/settings.png)
+
+### Uploading manga for OCR (admin only)
+
+Settings → Upload manga: pick a library, an archive of raw page images, and
+a name. The job is queued and its progress (current volume, page count)
+streams into a live log on the same page until the EPUB is ready and shows
+up in the library.
+
+![Upload/conversion log](docs/screenshots/conversion-log.png)
+
+---
+
 ## .env
 
 ```dotenv
@@ -58,6 +100,11 @@ POSTGRES_DB=yomekuro
 YOMEKURO_ADMIN_USER=admin
 YOMEKURO_ADMIN_PASSWORD=change-me
 ```
+
+See `.env.example` for the full list, including optional tuning knobs
+(`YOMEKURO_JOBS_POLL_INTERVAL_MS`, `YOMEKURO_ZIP_CACHE_SIZE`,
+`CONVERTER_POLL_INTERVAL`, `CONVERTER_PROGRESS_EVERY`, `CONVERTER_MOKURO_RETRIES`,
+`CONVERTER_MOKURO_RETRY_DELAY`) — all have sensible defaults if left unset.
 
 ---
 

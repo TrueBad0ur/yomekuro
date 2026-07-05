@@ -285,11 +285,8 @@ func writeLineDiv(b *strings.Builder, text string, coords [][]float64, vertical 
 		fs = 16
 	}
 
-	// No width/height: a fixed cross-axis size is what lets the browser wrap the
-	// column/row when sub-pixel rounding makes content 1px too big. With the size
-	// left to auto + white-space:nowrap, the text box hugs its single line and can
-	// never break into a second column. Position comes from left/top; font-size
-	// (= axis length / char count) reproduces the original extent.
+	// No explicit width/height: white-space:nowrap + font-size derived from
+	// axis-length/char-count reproduces the original extent without it.
 	style := fmt.Sprintf(
 		"position:absolute;left:%dpx;top:%dpx;font-size:%.1fpx;line-height:1;white-space:nowrap;color:transparent;cursor:text;-webkit-user-select:text;user-select:text;",
 		iround(minX), iround(minY), fs,

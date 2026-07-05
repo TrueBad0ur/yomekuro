@@ -1,12 +1,6 @@
-# Production deployment: pulls pre-built images from Docker Hub, never builds
-# locally. Images are published by .github/workflows/release.yml when a git
-# tag is pushed to main — set YOMEKURO_VERSION below to that tag.
-#
-#   docker compose -f docker-compose.prod.yml pull
-#   docker compose -f docker-compose.prod.yml up -d
-#
-# For local development / building images yourself, use docker-compose.yml
-# (or docker-compose.dev.yml, its explicit name) instead.
+# Production: pulls pre-built images, never builds locally.
+#   docker compose -f docker-compose.prod.yml pull && up -d
+# For local builds use docker-compose.yml / docker-compose.dev.yml instead.
 
 services:
   db:
@@ -33,15 +27,15 @@ services:
       YOMEKURO_ADDR: ":8080"
       YOMEKURO_ADMIN_USER: ${YOMEKURO_ADMIN_USER:-admin}
       YOMEKURO_ADMIN_PASSWORD: ${YOMEKURO_ADMIN_PASSWORD}
+      YOMEKURO_JOBS_POLL_INTERVAL_MS: ${YOMEKURO_JOBS_POLL_INTERVAL_MS:-20000}
+      YOMEKURO_ZIP_CACHE_SIZE: ${YOMEKURO_ZIP_CACHE_SIZE:-20}
     volumes:
       - ./library:/library
       - ./data/app:/data
     ports:
       - "8080:8080"
 
-  # Persistent GPU worker for manga uploads made through the UI — see
-  # converter/docker-compose.yml (dev) for the equivalent build-based service
-  # and its comments on device/group_add requirements (AMD ROCm host).
+  # Persistent GPU worker for manga uploads made through the UI.
   converter-worker:
     image: truebad0ur/converter:gpu-${CONVERTER_VERSION}
     command: ["--watch", "--library", "/library"]
@@ -60,6 +54,10 @@ services:
       ROCR_VISIBLE_DEVICES: "0"
       HIP_VISIBLE_DEVICES: "0"
       CONVERTER_DB: "postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}?sslmode=disable"
+      CONVERTER_POLL_INTERVAL: ${CONVERTER_POLL_INTERVAL:-10s}
+      CONVERTER_PROGRESS_EVERY: ${CONVERTER_PROGRESS_EVERY:-10}
+      CONVERTER_MOKURO_RETRIES: ${CONVERTER_MOKURO_RETRIES:-3}
+      CONVERTER_MOKURO_RETRY_DELAY: ${CONVERTER_MOKURO_RETRY_DELAY:-5s}
     volumes:
       - ./library:/library
       - ./data/hf-cache:/root/.cache/huggingface

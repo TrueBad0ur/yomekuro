@@ -17,34 +17,23 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         libjxl-tools \
     && rm -rf /var/lib/apt/lists/*
 
-# libdrm looks up PCI IDs here (AMD's own ROCm-flavored libdrm build path) to
-# print a human-readable GPU name; we don't install the ROCm apt repo (the
-# torch wheel doesn't need it), so the file is missing and libdrm logs a
-# harmless "No such file or directory" on every startup. An empty placeholder
-# silences it — it's only used for pretty-printing, not device init.
+# Missing PCI-ID file makes libdrm log a harmless warning on every startup;
+# empty placeholder silences it (used only for pretty-printing GPU names).
 RUN mkdir -p /opt/amdgpu/share/libdrm && touch /opt/amdgpu/share/libdrm/amdgpu.ids
 
 # Silence "sending unauthenticated requests to the HF Hub" — we don't need a
 # token for the public manga-ocr-base model, just the rate limits it warns about.
 ENV HF_HUB_VERBOSITY=error
 
-# ROCm torch wheels bundle their own ROCm runtime libs (unlike onnxruntime-rocm,
-# which needs the system ROCm apt packages) — no apt rocm repo needed here.
-# libnuma1 is a required system dependency the wheel does NOT bundle: without it,
-# HSA agent init fails silently (torch.cuda.is_available() just returns False,
-# no exception) rather than raising an obvious error.
+# Without libnuma1, HSA agent init fails silently instead of raising an error.
 # Install before mokuro to prevent pip pulling default CUDA torch.
 RUN pip install --no-cache-dir \
     torch torchvision \
     --index-url https://download.pytorch.org/whl/rocm6.4
 
 COPY mokuro/ /mokuro/
-# transformers>=5.13.0 broke loading manga-ocr-base's (BertJapaneseTokenizer)
-# tokenizer entirely — "Couldn't instantiate the backend tokenizer" even with
-# sentencepiece installed. mokuro pins no upper bound, so an unpinned install
-# silently picks up the regression on any rebuild after it was published.
-# 5.12.1 is the last version confirmed working; sentencepiece is kept as a
-# harmless belt-and-suspenders in case a future pin still needs it.
+# transformers>=5.13.0 breaks loading manga-ocr-base's tokenizer; 5.12.1 is the
+# last version confirmed working.
 RUN pip install --no-cache-dir /mokuro sentencepiece "transformers==5.12.1" && \
     cp -r /mokuro/mokuro/assets \
       "$(python3 -c 'import importlib.util,pathlib; print(pathlib.Path(importlib.util.find_spec("mokuro").origin).parent)')"

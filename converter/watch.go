@@ -11,15 +11,9 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// runWatch is a persistent worker: on every tick it (1) drains yomekuro's
-// upload-driven job queue in Postgres, then (2) scans library for "<name>-in"
-// folders nobody's upload created a DB row for — the manual workflow of
-// dropping a pre-staged raw-scan folder straight into the library and
-// renaming it "<name>-in" by hand, unrelated to the UI. Both converge on the
-// same Convert() call. Unlike DB jobs, a manual folder has no terminal status
-// to mark, so we skip it once its volume count is already matched by EPUBs in
-// the output dir — otherwise a folder left in place gets fully rebuilt (model
-// load + repackaging every volume) on every single poll tick, forever.
+// runWatch is a persistent worker: each tick drains yomekuro's upload job
+// queue, then scans the library for manually-created "<name>-in" folders with
+// no DB row.
 func runWatch(pool *pgxpool.Pool, library string, interval time.Duration) {
 	slog.Info("watch mode started", "library", library, "poll_interval", interval)
 	ctx := context.Background()
@@ -52,6 +46,7 @@ func drainQueue(ctx context.Context, pool *pgxpool.Pool) {
 		case err != nil:
 			slog.Error("watch: conversion failed", "job", j.Name, "err", err)
 			markJobFailed(ctx, pool, j.ID, err.Error())
+			cleanupFailedJob(j.Name, j.InputPath, j.OutputPath)
 		case fail > 0 || ok == 0:
 			msg := "no volumes were converted"
 			if fail > 0 {
@@ -59,10 +54,28 @@ func drainQueue(ctx context.Context, pool *pgxpool.Pool) {
 			}
 			slog.Error("watch: conversion unsuccessful", "job", j.Name, "detail", msg)
 			markJobFailed(ctx, pool, j.ID, msg)
+			// A partial failure (some volumes did convert) leaves real output in
+			// place — only wipe the staging folders when *nothing* succeeded,
+			// otherwise this would delete a partially-finished manga.
+			if ok == 0 {
+				cleanupFailedJob(j.Name, j.InputPath, j.OutputPath)
+			}
 		default:
 			slog.Info("watch: conversion done", "job", j.Name, "volumes", ok)
 			markJobDone(ctx, pool, j.ID)
 		}
+	}
+}
+
+// cleanupFailedJob removes a completely-failed upload's staging folders so
+// the same name can be retried — only called when nothing at all converted,
+// so the output dir is guaranteed empty.
+func cleanupFailedJob(name, inputPath, outputPath string) {
+	if err := os.RemoveAll(inputPath); err != nil {
+		slog.Warn("watch: cleanup failed job input", "job", name, "path", inputPath, "err", err)
+	}
+	if err := os.RemoveAll(outputPath); err != nil {
+		slog.Warn("watch: cleanup failed job output", "job", name, "path", outputPath, "err", err)
 	}
 }
 

@@ -10,12 +10,9 @@ import (
 )
 
 // Convert runs mokuro OCR over input (a folder of volume subdirectories, or a
-// single flat folder of page images treated as one volume) and writes one
-// EPUB per volume into output. If volume is non-empty, only that subdirectory
-// of input is (re-)built into output — matching the pre-existing --volume CLI
-// flag behavior. Returns the number of volumes built successfully and failed.
-// onVolume, if non-nil, is called with each volume's name as mokuro starts
-// OCR'ing it — callers use this to surface live progress; pass nil to skip.
+// single flat folder of images treated as one volume) and writes one EPUB per
+// volume into output. onVolume, if non-nil, is called with each volume's name
+// as mokuro starts OCR'ing it.
 func Convert(input, output, volume string, noCache bool, onVolume func(string)) (ok, fail int, err error) {
 	if err := os.MkdirAll(output, 0755); err != nil {
 		return 0, 0, fmt.Errorf("create output dir: %w", err)
@@ -25,11 +22,9 @@ func Convert(input, output, volume string, noCache bool, onVolume func(string)) 
 		return 0, 0, fmt.Errorf("convert jxl pages: %w", err)
 	}
 
-	// mokuroDir is what --parent_dir points at, and where mokuro writes .mokuro/_ocr
-	// output. volumesBaseDir is the directory whose "<volumeName>/" subfolders hold
-	// the actual page images (used to build EPUBs afterward). Normally these are
-	// both input. A flat input (images directly inside it, no volume subfolders)
-	// is treated as a single volume via a throwaway symlink dir — see below.
+	// mokuroDir is what --parent_dir points at; volumesBaseDir holds the actual
+	// page images. Normally both are input — differ only for the flat-volume
+	// symlink case below.
 	mokuroDir := input
 	volumesBaseDir := input
 
@@ -43,11 +38,8 @@ func Convert(input, output, volume string, noCache bool, onVolume func(string)) 
 			return 0, 0, fmt.Errorf("read input dir: %w", err)
 		}
 		if flat {
-			// Name the volume after output, not input: for queue-driven uploads
-			// input is "<name>-in" (the raw-scan staging folder) and output is
-			// the clean "<name>" — using input's name here leaked the "-in"
-			// suffix into the volume title mokuro records, and from there into
-			// the book title shown in the UI.
+			// Name after output, not input — input is "<name>-in" for uploads,
+			// output is the clean "<name>".
 			volumeName := filepath.Base(output)
 			absInput, err := filepath.Abs(input)
 			if err != nil {
@@ -58,10 +50,8 @@ func Convert(input, output, volume string, noCache bool, onVolume func(string)) 
 				return 0, 0, fmt.Errorf("create temp dir: %w", err)
 			}
 			defer os.RemoveAll(tmpParent)
-			// python-fire (mokuro's CLI) mis-tokenizes bare positional path
-			// arguments containing spaces, so we can't pass input directly —
-			// keep using --parent_dir (already spaces-safe as a single
-			// --flag=value token) pointed at a symlink dir instead.
+			// python-fire mis-tokenizes paths with spaces as positional args, so
+			// symlink into a temp dir and point --parent_dir at that instead.
 			if err := os.Symlink(absInput, filepath.Join(tmpParent, volumeName)); err != nil {
 				return 0, 0, fmt.Errorf("create flat-volume symlink: %w", err)
 			}
@@ -139,19 +129,17 @@ func isFlatVolume(dir string) (bool, error) {
 	return hasImage, nil
 }
 
-// convertJXLPages walks dir for .jxl page images and decodes each to a
-// same-named .jpg via djxl (libjxl-tools), then removes the original.
-// mokuro's own page scanner (mokuro/volume.py) hard-codes the extensions it
-// recognizes — .jpg/.jpeg/.png/.webp — and never learns new ones, and its
-// image loader (OpenCV) can't read JXL either way. So JXL has to become a
-// normal raster format before mokuro ever looks at the folder, not after.
+// convertJXLPages decodes .jxl page images to .png via djxl (libjxl-tools) and
+// removes the originals — mokuro's page scanner only recognizes
+// jpg/jpeg/png/webp. PNG rather than JPEG output avoids djxl's "lossless JPEG
+// reconstruction" path, which fails on some real-world JXLs.
 func convertJXLPages(dir string) error {
 	return filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
 		if err != nil || d.IsDir() || strings.ToLower(filepath.Ext(path)) != ".jxl" {
 			return err
 		}
-		jpgPath := strings.TrimSuffix(path, filepath.Ext(path)) + ".jpg"
-		if out, err := exec.Command("djxl", path, jpgPath).CombinedOutput(); err != nil {
+		pngPath := strings.TrimSuffix(path, filepath.Ext(path)) + ".png"
+		if out, err := exec.Command("djxl", path, pngPath).CombinedOutput(); err != nil {
 			return fmt.Errorf("djxl %s: %w: %s", path, err, out)
 		}
 		return os.Remove(path)

@@ -17,8 +17,8 @@ func main() {
 	volume := flag.String("volume", "", "Process only this volume subdirectory name (e.g. 'Dungeon Meshi v01')")
 	noCache := flag.Bool("no-cache", false, "Re-run OCR even if cached results exist")
 	watch := flag.Bool("watch", false, "Run as a persistent worker: drain yomekuro's upload job queue and poll --library for manually-created <name>-in/ folders")
-	library := flag.String("library", "/library", "Library root to poll for manually-created <name>-in/ folders (--watch mode only)")
-	pollInterval := flag.Duration("poll-interval", 10*time.Second, "Poll interval for --watch mode")
+	library := flag.String("library", env("CONVERTER_LIBRARY", "/library"), "Library root to poll for manually-created <name>-in/ folders (--watch mode only; env CONVERTER_LIBRARY)")
+	pollInterval := flag.Duration("poll-interval", envDuration("CONVERTER_POLL_INTERVAL", 10*time.Second), "Poll interval for --watch mode (env CONVERTER_POLL_INTERVAL)")
 	dbDSN := flag.String("db", os.Getenv("CONVERTER_DB"), "PostgreSQL DSN for the upload job queue (--watch mode only; env CONVERTER_DB)")
 	flag.Parse()
 

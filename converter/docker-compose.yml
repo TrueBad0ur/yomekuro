@@ -6,17 +6,10 @@ services:
     volumes:
       - ../library:/library
       - ./data/hf-cache:/root/.cache/huggingface
-      # comic-text-detector weight (mokuro.cache) — NOT part of the HF hub cache above,
-      # it's fetched straight from a GitHub release URL; without this mount it
-      # re-downloads on every fresh container.
-      - ./data/manga-ocr-cache:/root/.cache/manga-ocr
+      - ./data/manga-ocr-cache:/root/.cache/manga-ocr # comic-text-detector weight cache
 
-  # Persistent GPU worker for uploads made through the yomekuro UI: drains the
-  # conversion_jobs table in yomekuro's Postgres (see root docker-compose.yml,
-  # brought in here via `include:`) and also polls /library for manually
-  # created "<name>-in/" folders (not from an upload — see watch.go).
-  # Independent of the one-shot `converter`/`converter-gpu` services above,
-  # which stay CLI-driven for manual `docker compose run` conversions.
+  # Persistent GPU worker: drains yomekuro's upload job queue and polls
+  # /library for manually-created "<name>-in/" folders.
   converter-worker:
     build:
       context: .
@@ -34,6 +27,10 @@ services:
       ROCR_VISIBLE_DEVICES: "0"
       HIP_VISIBLE_DEVICES: "0"
       CONVERTER_DB: "postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}?sslmode=disable"
+      CONVERTER_POLL_INTERVAL: ${CONVERTER_POLL_INTERVAL:-10s}
+      CONVERTER_PROGRESS_EVERY: ${CONVERTER_PROGRESS_EVERY:-10}
+      CONVERTER_MOKURO_RETRIES: ${CONVERTER_MOKURO_RETRIES:-3}
+      CONVERTER_MOKURO_RETRY_DELAY: ${CONVERTER_MOKURO_RETRY_DELAY:-5s}
     volumes:
       - ../library:/library
       - ./data/hf-cache:/root/.cache/huggingface
@@ -56,7 +53,4 @@ services:
     volumes:
       - ../library:/library
       - ./data/hf-cache:/root/.cache/huggingface
-      # comic-text-detector weight (mokuro.cache) — NOT part of the HF hub cache above,
-      # it's fetched straight from a GitHub release URL; without this mount it
-      # re-downloads on every fresh container.
-      - ./data/manga-ocr-cache:/root/.cache/manga-ocr
+      - ./data/manga-ocr-cache:/root/.cache/manga-ocr # comic-text-detector weight cache

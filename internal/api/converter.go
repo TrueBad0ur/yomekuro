@@ -17,10 +17,8 @@ const maxUploadBytes = 5 << 30 // 5GiB — raw manga scans can be large
 
 var archiveExts = []string{".tar.gz", ".tar.xz", ".tgz", ".txz", ".tar", ".zip", ".7z", ".rar"}
 
-// matchedArchiveExt returns the recognized (possibly compound, e.g. ".tar.gz")
-// extension suffix of filename, or "" if none match. filepath.Ext() can't be
-// used here — it only ever returns the last dot-segment, truncating ".tar.gz"
-// down to ".gz".
+// matchedArchiveExt returns the matched (possibly compound) extension, since
+// filepath.Ext() would truncate ".tar.gz" down to ".gz".
 func matchedArchiveExt(filename string) string {
 	lower := strings.ToLower(filename)
 	for _, ext := range archiveExts {

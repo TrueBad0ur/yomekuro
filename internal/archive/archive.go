@@ -18,13 +18,9 @@ import (
 )
 
 // Extract detects the archive format from archivePath's extension and extracts
-// its contents into destDir (created if needed). Entries under "__MACOSX/", named
-// ".DS_Store", or with a "._" prefix (macOS AppleDouble resource forks) are
-// skipped. Entries that would escape destDir (zip-slip) are rejected.
-//
-// A single top-level wrapping directory (e.g. archives packed as
-// `zip -r "Name.zip" "Name/"`) is collapsed away afterward — see
-// collapseSingleRoot's doc comment for why this matters for multi-volume manga.
+// its contents into destDir (created if needed), skipping OS junk and
+// rejecting zip-slip entries. A single top-level wrapping directory is
+// collapsed away afterward — see collapseSingleRoot.
 func Extract(archivePath, destDir string) error {
 	if err := os.MkdirAll(destDir, 0o755); err != nil {
 		return fmt.Errorf("archive: mkdir dest: %w", err)
@@ -283,15 +279,10 @@ func safeJoin(destDir, name string) (string, error) {
 	return filepath.Join(destDir, clean), nil
 }
 
-// collapseSingleRoot repeatedly strips a redundant top-level wrapping
-// directory — the common case being an archive packed as
-// `zip -r "Big Order.zip" "Big Order/"`, which extracts as
-// dir/Big Order/vol.01, dir/Big Order/vol.02, ... instead of
-// dir/vol.01, dir/vol.02, ... . Left uncollapsed, the caller's "one
-// subfolder = one volume" detection sees exactly one subfolder ("Big Order")
-// and treats the whole thing as a single volume — mokuro then globs every
-// image under it recursively, silently merging all real volumes' pages into
-// one. Runs in a loop in case an archive nests more than one such wrapper.
+// collapseSingleRoot strips a redundant top-level wrapping directory (e.g.
+// `zip -r "Name.zip" "Name/"`) — left uncollapsed, the "one subfolder = one
+// volume" detection sees a single wrapper folder and merges all real volumes
+// into one. Loops in case an archive nests more than one such wrapper.
 func collapseSingleRoot(dir string) error {
 	for {
 		entries, err := os.ReadDir(dir)
@@ -308,12 +299,9 @@ func collapseSingleRoot(dir string) error {
 			return fmt.Errorf("archive: collapse root: %w", err)
 		}
 
-		// Only collapse if the sole subdirectory itself holds further
-		// subdirectories (a multi-volume wrapper, e.g. "Big Order/vol.01/",
-		// "Big Order/vol.02/"). If it holds images directly, it's a
-		// legitimate single volume named after that folder — collapsing
-		// would discard that name (the volume would end up named after the
-		// "<name>-in" upload dir instead, "-in" suffix and all).
+		// Only collapse if the subdirectory itself holds further subdirectories
+		// (a multi-volume wrapper) — if it holds images directly, it's a
+		// legitimate single volume named after that folder.
 		hasSubdir := false
 		for _, e := range innerEntries {
 			if e.IsDir() {

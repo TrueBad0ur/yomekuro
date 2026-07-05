@@ -58,10 +58,8 @@ func DeleteConversionJob(ctx context.Context, pool *pgxpool.Pool, id [16]byte) e
 	return err
 }
 
-// NameOrPathTaken reports whether a non-terminal (pending/running) job already
-// targets this name in this library, or the name collides with an existing
-// on-disk "<name>-in"/"<name>" folder. Callers should also stat the
-// filesystem paths — this only covers concurrent uploads racing the DB.
+// ConversionJobNameTaken reports whether a non-terminal job already targets
+// this name; callers should also stat the filesystem for on-disk collisions.
 func ConversionJobNameTaken(ctx context.Context, pool *pgxpool.Pool, libraryID [16]byte, name string) (bool, error) {
 	var exists bool
 	err := pool.QueryRow(ctx,

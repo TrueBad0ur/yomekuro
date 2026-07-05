@@ -15,6 +15,15 @@ type Config struct {
 	AdminPassword string
 
 	ScanOnStart bool
+
+	// JobsPollIntervalMS is how often the Settings page's conversion-job list
+	// re-fetches. Frontend JS can't read container env directly, so this is
+	// served back to it via GET /api/config.
+	JobsPollIntervalMS int
+	// ZipCacheSize is the number of open EPUB zip archives kept in the LRU
+	// cache (internal/api/content.go's zipCache) — concurrent chapter reads
+	// reuse a cached handle instead of reopening the archive.
+	ZipCacheSize int
 }
 
 func Load() Config {
@@ -26,6 +35,8 @@ func Load() Config {
 	flag.StringVar(&c.AdminUser, "admin-user", env("YOMEKURO_ADMIN_USER", "admin"), "Admin username (created on first run)")
 	flag.StringVar(&c.AdminPassword, "admin-password", env("YOMEKURO_ADMIN_PASSWORD", ""), "Admin password (created on first run)")
 	flag.BoolVar(&c.ScanOnStart, "scan-on-start", boolEnv("YOMEKURO_SCAN_ON_START", true), "Run full library scan on startup")
+	flag.IntVar(&c.JobsPollIntervalMS, "jobs-poll-interval-ms", intEnv("YOMEKURO_JOBS_POLL_INTERVAL_MS", 20000), "How often (ms) the Settings page polls for conversion job updates")
+	flag.IntVar(&c.ZipCacheSize, "zip-cache-size", intEnv("YOMEKURO_ZIP_CACHE_SIZE", 20), "Number of open EPUB archives kept cached")
 	flag.Parse()
 
 	return c
@@ -48,4 +59,16 @@ func boolEnv(key string, def bool) bool {
 		return def
 	}
 	return b
+}
+
+func intEnv(key string, def int) int {
+	v := os.Getenv(key)
+	if v == "" {
+		return def
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil {
+		return def
+	}
+	return n
 }
