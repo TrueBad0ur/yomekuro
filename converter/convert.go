@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 )
@@ -18,6 +19,10 @@ import (
 func Convert(input, output, volume string, noCache bool, onVolume func(string)) (ok, fail int, err error) {
 	if err := os.MkdirAll(output, 0755); err != nil {
 		return 0, 0, fmt.Errorf("create output dir: %w", err)
+	}
+
+	if err := convertJXLPages(input); err != nil {
+		return 0, 0, fmt.Errorf("convert jxl pages: %w", err)
 	}
 
 	// mokuroDir is what --parent_dir points at, and where mokuro writes .mokuro/_ocr
@@ -38,7 +43,12 @@ func Convert(input, output, volume string, noCache bool, onVolume func(string)) 
 			return 0, 0, fmt.Errorf("read input dir: %w", err)
 		}
 		if flat {
-			volumeName := filepath.Base(input)
+			// Name the volume after output, not input: for queue-driven uploads
+			// input is "<name>-in" (the raw-scan staging folder) and output is
+			// the clean "<name>" — using input's name here leaked the "-in"
+			// suffix into the volume title mokuro records, and from there into
+			// the book title shown in the UI.
+			volumeName := filepath.Base(output)
 			absInput, err := filepath.Abs(input)
 			if err != nil {
 				return 0, 0, fmt.Errorf("resolve input path: %w", err)
@@ -122,9 +132,28 @@ func isFlatVolume(dir string) (bool, error) {
 			continue
 		}
 		switch strings.ToLower(filepath.Ext(e.Name())) {
-		case ".jpg", ".jpeg", ".png", ".webp":
+		case ".jpg", ".jpeg", ".png", ".webp", ".jxl":
 			hasImage = true
 		}
 	}
 	return hasImage, nil
+}
+
+// convertJXLPages walks dir for .jxl page images and decodes each to a
+// same-named .jpg via djxl (libjxl-tools), then removes the original.
+// mokuro's own page scanner (mokuro/volume.py) hard-codes the extensions it
+// recognizes — .jpg/.jpeg/.png/.webp — and never learns new ones, and its
+// image loader (OpenCV) can't read JXL either way. So JXL has to become a
+// normal raster format before mokuro ever looks at the folder, not after.
+func convertJXLPages(dir string) error {
+	return filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
+		if err != nil || d.IsDir() || strings.ToLower(filepath.Ext(path)) != ".jxl" {
+			return err
+		}
+		jpgPath := strings.TrimSuffix(path, filepath.Ext(path)) + ".jpg"
+		if out, err := exec.Command("djxl", path, jpgPath).CombinedOutput(); err != nil {
+			return fmt.Errorf("djxl %s: %w: %s", path, err, out)
+		}
+		return os.Remove(path)
+	})
 }

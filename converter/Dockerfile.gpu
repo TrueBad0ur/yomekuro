@@ -14,6 +14,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         libgl1 \
         libglib2.0-0 \
         libnuma1 \
+        libjxl-tools \
     && rm -rf /var/lib/apt/lists/*
 
 # libdrm looks up PCI IDs here (AMD's own ROCm-flavored libdrm build path) to

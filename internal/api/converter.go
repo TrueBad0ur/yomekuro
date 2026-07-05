@@ -170,7 +170,7 @@ func containsImage(dir string) bool {
 			return nil
 		}
 		switch strings.ToLower(filepath.Ext(d.Name())) {
-		case ".jpg", ".jpeg", ".png", ".webp":
+		case ".jpg", ".jpeg", ".png", ".webp", ".jxl":
 			found = true
 		}
 		return nil

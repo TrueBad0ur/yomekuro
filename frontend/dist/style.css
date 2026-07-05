@@ -801,12 +801,13 @@ body.page-settings { max-width: 1080px; margin: 0 auto; padding: 0 1.5rem 3rem; 
 .job-delete-btn:hover:not(:disabled) { background: color-mix(in srgb, #e07070 12%, transparent); }
 
 .job-current-volume {
+  display: block;
   font-size: 0.78rem;
   color: var(--text-dim);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  max-width: 220px;
+  margin-bottom: 0.5rem;
 }
 
 .job-status-pending { color: var(--text-dim); }

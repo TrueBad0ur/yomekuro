@@ -131,7 +131,7 @@ func countVolumes(dir string) (int, error) {
 			continue
 		}
 		switch strings.ToLower(filepath.Ext(e.Name())) {
-		case ".jpg", ".jpeg", ".png", ".webp":
+		case ".jpg", ".jpeg", ".png", ".webp", ".jxl":
 			hasImage = true
 		}
 	}

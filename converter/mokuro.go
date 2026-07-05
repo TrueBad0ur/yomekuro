@@ -9,6 +9,19 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"time"
+)
+
+// mokuroRetries/mokuroRetryDelay bound retrying the whole mokuro invocation
+// on failure — mokuro lazily downloads model weights (e.g. comictextdetector.pt)
+// on first use, and a transient DNS/network blip during that download fails
+// the entire run even though nothing is actually wrong. Safe to just retry:
+// mokuro skips any volume that already has a .mokuro result file, so a retry
+// after a partial run only redoes what didn't finish, never reprocesses
+// already-successful volumes.
+const (
+	mokuroRetries    = 3
+	mokuroRetryDelay = 5 * time.Second
 )
 
 type MokuroVolume struct {
@@ -86,7 +99,12 @@ func runMokuro(inputDir string, volumeDirs []string, noCache bool, onVolume func
 		}
 	}
 
-	args := []string{"-m", "mokuro", "--disable_confirmation", "--legacy_html=False"}
+	// -u: Python fully-buffers stdout by default once it's not a TTY (i.e. always,
+	// under Docker/exec.Command) — tqdm's page-progress bar then only actually
+	// reaches the log once its buffer fills or the process exits, making a 6-minute
+	// OCR run look completely frozen until it's done. Unbuffered makes every write
+	// (including tqdm's \r-updates) show up live.
+	args := []string{"-u", "-m", "mokuro", "--disable_confirmation", "--legacy_html=False"}
 	if noCache && len(volumeDirs) == 0 {
 		// global no-cache only when no specific volume selected
 		args = append(args, "--no_cache")
@@ -94,15 +112,25 @@ func runMokuro(inputDir string, volumeDirs []string, noCache bool, onVolume func
 	// always use --parent_dir to avoid fire positional-arg issues with spaces in paths
 	args = append(args, "--parent_dir="+inputDir)
 
-	cmd := exec.Command("python", args...)
-	cmd.Stdout = os.Stdout
-	if onVolume != nil {
-		cmd.Stderr = &volumeLogWriter{onVolume: onVolume}
-	} else {
-		cmd.Stderr = os.Stderr
+	var err error
+	for attempt := 1; attempt <= mokuroRetries; attempt++ {
+		cmd := exec.Command("python", args...)
+		cmd.Stdout = os.Stdout
+		if onVolume != nil {
+			cmd.Stderr = &volumeLogWriter{onVolume: onVolume}
+		} else {
+			cmd.Stderr = os.Stderr
+		}
+		slog.Info("exec", "cmd", cmd.String(), "attempt", attempt)
+		if err = cmd.Run(); err == nil {
+			return nil
+		}
+		if attempt < mokuroRetries {
+			slog.Warn("mokuro failed, retrying", "attempt", attempt, "err", err)
+			time.Sleep(mokuroRetryDelay)
+		}
 	}
-	slog.Info("exec", "cmd", cmd.String())
-	return cmd.Run()
+	return err
 }
 
 func parseMokuroFile(path string) (MokuroVolume, error) {
