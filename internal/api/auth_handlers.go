@@ -39,7 +39,7 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	setSessionCookie(w, token)
+	setSessionCookie(w, r, token)
 	respond(w, map[string]any{
 		"id":       db.UUIDString(user.ID),
 		"username": user.Username,
@@ -72,7 +72,7 @@ func (s *Server) register(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	setSessionCookie(w, token)
+	setSessionCookie(w, r, token)
 	w.WriteHeader(http.StatusCreated)
 	respond(w, map[string]any{
 		"id":       db.UUIDString(user.ID),
@@ -87,11 +87,14 @@ func (s *Server) logout(w http.ResponseWriter, r *http.Request) {
 		_ = auth.DeleteSession(r.Context(), s.db, token)
 	}
 	http.SetCookie(w, &http.Cookie{
-		Name:    "session",
-		Value:   "",
-		Path:    "/",
-		MaxAge:  -1,
-		Expires: time.Unix(0, 0),
+		Name:     "session",
+		Value:    "",
+		Path:     "/",
+		HttpOnly: true,
+		Secure:   isHTTPS(r),
+		SameSite: http.SameSiteLaxMode,
+		MaxAge:   -1,
+		Expires:  time.Unix(0, 0),
 	})
 	w.WriteHeader(http.StatusNoContent)
 }
@@ -109,13 +112,21 @@ func (s *Server) me(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func setSessionCookie(w http.ResponseWriter, token string) {
+func setSessionCookie(w http.ResponseWriter, r *http.Request, token string) {
 	http.SetCookie(w, &http.Cookie{
 		Name:     "session",
 		Value:    token,
 		Path:     "/",
 		HttpOnly: true,
+		Secure:   isHTTPS(r),
 		SameSite: http.SameSiteLaxMode,
 		MaxAge:   int(auth.SessionDuration.Seconds()),
 	})
+}
+
+// isHTTPS reports whether the request reached us over TLS, directly or via a
+// reverse proxy — checked so the session cookie gets Secure without breaking
+// logins on a plain-HTTP deployment (this server has no TLS support itself).
+func isHTTPS(r *http.Request) bool {
+	return r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https"
 }

@@ -1,0 +1,167 @@
+name: Security scan
+
+# Informational SAST/SCA scans — never gates anything (every scan step is
+# continue-on-error and every scanner runs with a zero exit code), separate
+# from test.yml/release.yml on purpose so a new finding never blocks a build.
+#
+# Findings are rendered as Markdown tables straight into each job's step
+# summary (the page GitHub shows above the job log) — no SARIF/Security-tab
+# integration, since that API needs GitHub Advanced Security, which isn't
+# enabled on this private repo (github/codeql-action/upload-sarif fails there
+# with "Resource not accessible by integration"). Raw JSON is also kept as a
+# build artifact for anyone who wants to feed it into another tool.
+#
+# All scanners are installed via `@latest`/vendor install script rather than
+# a pinned version, so this always runs the newest release.
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  sast:
+    name: SAST — gosec (${{ matrix.module }})
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    strategy:
+      matrix:
+        module: [yomekuro, converter]
+        include:
+          - module: yomekuro
+            dir: .
+            gomod: go.mod
+          - module: converter
+            dir: converter
+            gomod: converter/go.mod
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: ${{ matrix.gomod }}
+
+      - name: Install gosec
+        run: go install github.com/securego/gosec/v2/cmd/gosec@latest
+
+      - name: Run gosec
+        working-directory: ${{ matrix.dir }}
+        continue-on-error: true
+        run: gosec -no-fail -fmt json -out gosec.json ./...
+
+      - name: Summarize findings
+        if: always()
+        working-directory: ${{ matrix.dir }}
+        run: |
+          echo "### gosec — ${{ matrix.module }}" | tee -a "$GITHUB_STEP_SUMMARY"
+          jq -r '
+            (.Issues // []) as $issues
+            | if ($issues | length) == 0 then "✅ No findings."
+              else
+                (["| Severity | Rule | Location | Details |","|---|---|---|---|"])[],
+                ($issues[] | "| \(.severity) | \(.rule_id) (CWE-\(.cwe.id // "?")) | \(.file | sub(".*/"; "")):\(.line) | \(.details | gsub("\\|"; "\\\\|")) |")
+              end
+          ' gosec.json | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload raw report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: gosec-${{ matrix.module }}
+          path: ${{ matrix.dir }}/gosec.json
+          retention-days: 30
+
+  govulncheck:
+    name: SCA — govulncheck (${{ matrix.module }})
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    strategy:
+      matrix:
+        module: [yomekuro, converter]
+        include:
+          - module: yomekuro
+            dir: .
+            gomod: go.mod
+          - module: converter
+            dir: converter
+            gomod: converter/go.mod
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: ${{ matrix.gomod }}
+
+      - name: Install govulncheck
+        run: go install golang.org/x/vuln/cmd/govulncheck@latest
+
+      - name: Run govulncheck
+        working-directory: ${{ matrix.dir }}
+        continue-on-error: true
+        run: |
+          {
+            echo "### govulncheck — ${{ matrix.module }}"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          govulncheck ./... | tee -a "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+
+  trivy:
+    name: SCA/IaC — Trivy (deps, Dockerfiles, compose)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: recursive
+
+      - name: Install Trivy (latest release)
+        run: curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b /usr/local/bin
+
+      - name: Trivy misconfig scan (Dockerfiles, compose)
+        continue-on-error: true
+        run: trivy config --exit-code 0 --format json --output trivy-config.json .
+
+      - name: Summarize misconfig findings
+        if: always()
+        run: |
+          echo "### Trivy misconfig" | tee -a "$GITHUB_STEP_SUMMARY"
+          jq -r '
+            def esc: gsub("\\|"; "\\|");
+            [.Results[]? | . as $r | ($r.Misconfigurations // [])[] | [$r.Target, .ID, .Severity, .Title, .Status]] as $rows
+            | if ($rows | length) == 0 then "✅ No misconfigurations found."
+              else
+                (["| Target | ID | Severity | Title | Status |","|---|---|---|---|---|"])[],
+                ($rows[] | "| \(.[0]|esc) | \(.[1]) | \(.[2]) | \(.[3]|esc) | \(.[4]) |")
+              end
+          ' trivy-config.json | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Trivy dependency vuln scan (go.mod/go.sum)
+        continue-on-error: true
+        run: trivy fs --exit-code 0 --format json --output trivy-fs.json --scanners vuln .
+
+      - name: Summarize dependency findings
+        if: always()
+        run: |
+          echo "### Trivy dependency vulnerabilities" | tee -a "$GITHUB_STEP_SUMMARY"
+          jq -r '
+            [.Results[]? | . as $r | ($r.Vulnerabilities // [])[] | [$r.Target, .PkgName, .VulnerabilityID, .Severity, .InstalledVersion, (.FixedVersion // "-")]] as $rows
+            | if ($rows | length) == 0 then "✅ No dependency vulnerabilities found."
+              else
+                (["| Target | Package | ID | Severity | Installed | Fixed |","|---|---|---|---|---|---|"])[],
+                ($rows[] | "| \(.[0]) | \(.[1]) | \(.[2]) | \(.[3]) | \(.[4]) | \(.[5]) |")
+              end
+          ' trivy-fs.json | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload raw reports
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: trivy-reports
+          path: |
+            trivy-config.json
+            trivy-fs.json
+          retention-days: 30

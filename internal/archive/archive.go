@@ -156,7 +156,10 @@ func extractTar(r io.Reader, destDir string) error {
 			if err := os.MkdirAll(filepath.Dir(destPath), 0o755); err != nil {
 				return err
 			}
-			mode := os.FileMode(hdr.Mode)
+			// Mask to plain rwx bits: hdr.Mode is attacker-controlled and
+			// archive/tar's int64 could carry setuid/setgid/sticky bits or
+			// overflow on truncation to os.FileMode otherwise.
+			mode := os.FileMode(hdr.Mode & 0o777)
 			if mode == 0 {
 				mode = 0o644
 			}

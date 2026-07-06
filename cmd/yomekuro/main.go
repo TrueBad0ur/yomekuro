@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/truebad0ur/yomekuro/internal/api"
 	"github.com/truebad0ur/yomekuro/internal/auth"
@@ -83,8 +84,18 @@ func main() {
 
 	router := api.NewRouter(pool, sc, watcher, cfg.Data, cfg.ZipCacheSize, cfg.JobsPollIntervalMS)
 
+	// WriteTimeout is deliberately unset — it'd cut off legitimate large
+	// EPUB/manga downloads to slow clients. ReadHeaderTimeout still guards
+	// against slow-header (Slowloris-style) connections.
+	srv := &http.Server{
+		Addr:              cfg.Addr,
+		Handler:           router,
+		ReadHeaderTimeout: 10 * time.Second,
+		IdleTimeout:       120 * time.Second,
+	}
+
 	slog.Info("yomekuro listening", "addr", cfg.Addr)
-	if err := http.ListenAndServe(cfg.Addr, router); err != nil {
+	if err := srv.ListenAndServe(); err != nil {
 		slog.Error("ListenAndServe", "err", err)
 		os.Exit(1)
 	}
