@@ -72,6 +72,14 @@ shortcuts.
 
 ![Reader](docs/screenshots/reader.png)
 
+### Bookmarks
+
+Select text while reading to highlight it as a bookmark; selections are
+saved per-book and stay put on furigana-heavy pages (`<ruby>`/`<rt>`) since
+only individual text nodes get wrapped, never whole elements.
+
+![Bookmarks](docs/screenshots/bookmarks.png)
+
 ### Settings (admin only)
 
 Regular users only get the theme toggle and logout button in the header.
