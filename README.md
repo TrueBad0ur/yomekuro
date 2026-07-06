@@ -130,7 +130,7 @@ CGO_ENABLED=0 go build -o yomekuro ./cmd/yomekuro
 docker buildx create --name multi --driver docker-container --use   # once
 
 docker buildx build --platform linux/amd64,linux/arm64 \
-  -t truebad0ur/yomekuro:0.2 --push .
+  -t truebad0ur/yomekuro:<tag> --push .
 
 docker buildx build --platform linux/amd64,linux/arm64 \
   -f converter/Dockerfile.cpu -t truebad0ur/converter:cpuonly --push converter/
@@ -149,8 +149,8 @@ from forks) never trigger a build. Either of these works:
 ```bash
 # plain git tag + push
 git checkout main
-git tag 2.0
-git push origin 2.0
+git tag <tag>
+git push origin <tag>
 ```
 
 or create a Release on GitHub (Releases → "Draft a new release" → type a new
@@ -160,9 +160,9 @@ workflow listens for both.
 
 Either way it pushes:
 
-- `truebad0ur/yomekuro:2.0` (linux/amd64 + linux/arm64)
-- `truebad0ur/converter:cpu-2.0` (linux/amd64)
-- `truebad0ur/converter:gpu-2.0` (linux/amd64)
+- `truebad0ur/yomekuro:<tag>` (linux/amd64 + linux/arm64)
+- `truebad0ur/converter:cpu-<tag>` (linux/amd64)
+- `truebad0ur/converter:gpu-<tag>` (linux/amd64)
 
 The tag name itself becomes the image tag, whatever it is — there's no `v`
 prefix convention enforced. Builds use GitHub Actions' layer cache
@@ -176,13 +176,13 @@ fails that never gets published.
 
 ```bash
 # new commit, push, and tag it in one go
-git add -A && git commit -m "msg" && git push origin main && git tag 2.2 && git push origin 2.2
+git add -A && git commit -m "msg" && git push origin main && git tag <tag> && git push origin <tag>
 
 # tag whatever's already on main (no new commit)
-git fetch origin main && git tag 2.2 origin/main && git push origin 2.2
+git fetch origin main && git tag <tag> origin/main && git push origin <tag>
 
 # amend the current commit, force-push main, move an existing tag onto it
-git add . && git commit --amend --no-edit && git push origin main -f && git tag -f 2.1 && git push origin 2.1 -f
+git add . && git commit --amend --no-edit && git push origin main -f && git tag -f <tag> && git push origin <tag> -f
 ```
 
 `git tag <name>` makes a lightweight tag — `git push origin <name>` (by name)
@@ -197,9 +197,9 @@ hand under its own new tag, then point only its `.env` variable
 (`YOMEKURO_VERSION` or `CONVERTER_VERSION`) at it:
 
 ```bash
-docker build -t truebad0ur/yomekuro:2.3.3 .
-docker push truebad0ur/yomekuro:2.3.3
-# .env: YOMEKURO_VERSION=2.3.3 (CONVERTER_VERSION stays wherever it was)
+docker build -t truebad0ur/yomekuro:<tag> .
+docker push truebad0ur/yomekuro:<tag>
+# .env: YOMEKURO_VERSION=<tag> (CONVERTER_VERSION stays wherever it was)
 ```
 
 **Required secrets**, in the `prod` GitHub Environment (Settings → Environments
