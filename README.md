@@ -6,6 +6,8 @@ Self-hosted EPUB library for Japanese light novels and manga. Single binary + Po
 
 Includes a companion **converter** that turns manga image folders into fixed-layout EPUBs with OCR text overlay for [Yomitan](https://github.com/themoeway/yomitan).
 
+**Live demo:** https://yomekuro.kubehomelab.space — log in with `test` / `test` to look around.
+
 ---
 
 ## Quick start
