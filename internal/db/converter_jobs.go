@@ -4,6 +4,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -51,11 +52,19 @@ func ListConversionJobs(ctx context.Context, pool *pgxpool.Pool) ([]ConversionJo
 	return jobs, rows.Err()
 }
 
-// DeleteConversionJob removes a job's DB row only — the extracted "<name>-in"
-// source and any produced "<name>" EPUBs are left on disk untouched.
-func DeleteConversionJob(ctx context.Context, pool *pgxpool.Pool, id [16]byte) error {
-	_, err := pool.Exec(ctx, `DELETE FROM conversion_jobs WHERE id = $1`, id)
-	return err
+// DeleteConversionJob removes a job's DB row and returns its input/output
+// paths so the caller can also clean those up. Leaving them on disk would
+// make the job reappear on its own: converter-worker's manual-folder scan
+// (converter/watch.go) treats any "<name>-in" folder with no matching DB row
+// as an unclaimed manual conversion and picks it right back up.
+func DeleteConversionJob(ctx context.Context, pool *pgxpool.Pool, id [16]byte) (inputPath, outputPath string, err error) {
+	err = pool.QueryRow(ctx,
+		`DELETE FROM conversion_jobs WHERE id = $1 RETURNING input_path, output_path`, id,
+	).Scan(&inputPath, &outputPath)
+	if err == pgx.ErrNoRows {
+		return "", "", nil
+	}
+	return inputPath, outputPath, err
 }
 
 // ConversionJobNameTaken reports whether a non-terminal job already targets

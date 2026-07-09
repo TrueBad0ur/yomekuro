@@ -127,26 +127,6 @@ body.page-library { display: flex; min-height: 100vh; }
   text-transform: uppercase;
 }
 
-.series-list { display: flex; flex-direction: column; }
-.series-item {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  width: 100%;
-  text-align: left;
-  border: none;
-  border-radius: 0;
-  padding: 0.5rem 0.9rem 0.5rem 1.3rem;
-  font-size: 0.85rem;
-  color: var(--text);
-  background: transparent;
-  gap: 0.5rem;
-  transition: background 0.12s;
-}
-.series-item:hover:not(:disabled) { background: color-mix(in srgb, var(--accent) 10%, transparent); color: var(--text); border-color: transparent; }
-.series-item.active { background: color-mix(in srgb, var(--accent) 15%, transparent); color: var(--accent); font-weight: 600; }
-.series-count { font-size: 0.72rem; color: var(--text-dim); flex-shrink: 0; }
-
 .nav-loading { font-size: 0.8rem; color: var(--text-dim); padding: 0.5rem 1.3rem; }
 
 .library-groups { display: flex; flex-direction: column; }
@@ -166,8 +146,7 @@ body.page-library { display: flex; min-height: 100vh; }
   transition: background 0.12s;
 }
 .library-group-header:hover { background: color-mix(in srgb, var(--accent) 10%, transparent); }
-.library-group-arrow { font-size: 0.7rem; color: var(--text-dim); width: 0.8em; flex-shrink: 0; }
-.library-group-series { display: flex; flex-direction: column; }
+.library-group-header.active { background: color-mix(in srgb, var(--accent) 15%, transparent); color: var(--accent); }
 
 .sidebar-footer {
   border-top: 1px solid var(--border);
@@ -815,11 +794,89 @@ body.page-settings { max-width: 1080px; margin: 0 auto; padding: 0 1.5rem 3rem; 
 .job-status-done     { color: #4caf7d; font-weight: 600; }
 .job-status-failed   { color: #e07070; font-weight: 600; }
 
+.upload-hint { color: var(--text-dim); font-size: 0.82rem; margin: 0 0 1.1rem; }
+
+.upload-field { margin-bottom: 0.9rem; }
+.upload-field-label {
+  display: block;
+  font-size: 0.76rem;
+  font-weight: 600;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  margin-bottom: 0.4rem;
+}
+
+.library-picker { display: flex; gap: 0.4rem; flex-wrap: wrap; }
+.library-pick-btn {
+  padding: 0.4rem 1rem;
+  font-size: 0.85rem;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+  transition: border-color 0.12s, background 0.12s;
+}
+.library-pick-btn:hover { border-color: var(--accent); }
+.library-pick-btn.active {
+  background: var(--accent);
+  color: var(--accent-ink);
+  border-color: var(--accent);
+  font-weight: 600;
+}
+
+.upload-dropzone {
+  display: flex;
+  align-items: center;
+  gap: 0.9rem;
+  padding: 1.1rem 1.2rem;
+  border: 1.5px dashed var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+  margin-bottom: 0.9rem;
+}
+.upload-dropzone:hover { border-color: var(--accent); }
+.upload-dropzone.dragover {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+}
+.upload-dropzone-icon {
+  font-size: 1.4rem;
+  color: var(--text-dim);
+  flex-shrink: 0;
+  line-height: 1;
+}
+.upload-dropzone-text { display: flex; flex-direction: column; gap: 0.2rem; min-width: 0; }
+.upload-dropzone-title { font-size: 0.88rem; font-weight: 500; }
+.upload-dropzone-sub {
+  font-size: 0.78rem;
+  color: var(--text-dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.upload-dropzone-sub.has-file { color: var(--accent); font-weight: 500; }
+
+.upload-actions { display: flex; align-items: center; gap: 0.9rem; }
+.upload-submit-btn {
+  padding: 0.55rem 1.5rem;
+  font-size: 0.88rem;
+  font-weight: 600;
+  background: var(--accent);
+  color: var(--accent-ink);
+  border: none;
+  border-radius: 8px;
+}
+.upload-submit-btn:hover:not(:disabled) { opacity: 0.9; }
+.upload-submit-btn:disabled { opacity: 0.6; }
+
 .upload-progress-row {
   display: flex;
   align-items: center;
   gap: 0.6rem;
-  margin-top: 0.6rem;
+  margin-top: 0.9rem;
 }
 .upload-progress-bar {
   flex: 1;

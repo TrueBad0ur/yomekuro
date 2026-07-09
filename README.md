@@ -40,11 +40,12 @@ picks `truebad0ur/yomekuro:<tag>`, `CONVERTER_VERSION` picks
 other when only one side actually changed. See "Releasing" below for how versions
 get published to Docker Hub.
 
-Mounts a single `./library` — with three subfolders inside, `ranobe/`, `manga/`,
-and `html/` (one series per subfolder of those, `.epub` files inside; `html/`
-holds standalone `.html` files, one file = one book). All three are registered
-as separate libraries and scanned automatically on boot. Open
-http://localhost:8080 and log in.
+Mounts a single `./library` — with four subfolders inside, `ranobe/`, `manga/`,
+`html/`, and `pdf/` (one series per subfolder of the first two, `.epub` files
+inside; `html/` holds standalone `.html` files, one file = one book; `pdf/` is
+for PDFs that aren't manga or ranobe — see "Converter" below, same upload
+pipeline applies). All four are registered as separate libraries and scanned
+automatically on boot. Open http://localhost:8080 and log in.
 
 The dev compose also brings up the converter services (`converter`,
 `converter-gpu`, `converter-worker` — see "Converter" below) via
@@ -58,7 +59,7 @@ works standalone if you only want the converter without yomekuro.
 ### Library page
 
 The home page lists your series as cover-art tiles, grouped by library
-(Ranobe / Manga / HTML) in the sidebar. Click a series to see its books,
+(Ranobe / Manga / HTML / PDF) in the sidebar. Click a series to see its books,
 click a book to start reading. Search and genre/tag filters are in the
 header; admins get an extra button on each book to edit its tags.
 
@@ -92,10 +93,10 @@ uploading manga for OCR conversion.
 
 ### Uploading manga for OCR (admin only)
 
-Settings → Upload manga: pick a library, an archive of raw page images, and
-a name. The job is queued and its progress (current volume, page count)
-streams into a live log on the same page until the EPUB is ready and shows
-up in the library.
+Settings → Upload manga: pick a library, drop an archive of raw page images
+or a PDF onto the upload area, and a name. The job is queued and its
+progress (current volume, page count) streams into a live log on the same
+page until the EPUB is ready and shows up in the library.
 
 ![Upload/conversion log](docs/screenshots/conversion-log.png)
 
@@ -234,16 +235,26 @@ one-shot CLI), `converter-gpu` (AMD ROCm, one-shot CLI), and `converter-worker`
 
 ### Upload via UI (recommended)
 
-Settings → Upload manga: pick a library, an archive (`.zip`/`.tar`/`.tar.gz`/
-`.tar.xz`/`.7z`/`.rar`) of raw page images, and a name. yomekuro extracts it into
-`<library>/<name>-in/`, strips OS junk (`.DS_Store`, `__MACOSX/`, `._*` — common
-in macOS-made archives), and queues a row in Postgres (`conversion_jobs`
-table). `converter-worker` picks it up, runs OCR on GPU, and writes EPUBs to
-`<library>/<name>/` — picked up by the next library scan automatically. Job
-status is polled in the same Settings page.
+Settings → Upload manga: pick a library, a file, and a name. The file is
+either an archive (`.zip`/`.tar`/`.tar.gz`/`.tar.xz`/`.7z`/`.rar`) of raw page
+images, or a `.pdf`. yomekuro stages it into `<library>/<name>-in/`
+(extracting archives and stripping OS junk — `.DS_Store`, `__MACOSX/`, `._*`
+— along the way), and queues a row in Postgres (`conversion_jobs` table).
+`converter-worker` picks it up and, per volume:
 
-This needs `./library` mounted read-write (it is, by default) — the extraction
-step writes into it.
+- **Image pages / scanned PDF** (no text layer): runs mokuro OCR on GPU.
+- **PDF with a real text layer**: skips OCR entirely — pulls the text and its
+  exact position straight out of the PDF (`pdftotext -bbox-layout`) and lays
+  it over the rendered page images, same fixed-layout shape as an OCR'd
+  volume. Whether a PDF counts as "has a text layer" is decided automatically
+  (average non-whitespace characters per page above a threshold).
+
+Either way the result is EPUBs written to `<library>/<name>/`, picked up by
+the next library scan automatically. Job status is polled in the same
+Settings page.
+
+This needs `./library` mounted read-write (it is, by default) — staging
+writes into it.
 
 ### Manual folders
 
@@ -330,7 +341,7 @@ volumes:
   - ./library:/library
 ```
 
-Inside it, three subfolders are each auto-registered as their own library and
+Inside it, four subfolders are each auto-registered as their own library and
 scanned on boot — no manual "add library" step needed:
 
 ```
@@ -338,10 +349,12 @@ library/
   ranobe/   # light novel EPUBs, one folder per series
   manga/    # manga EPUBs (converter output or your own), one folder per series
   html/     # standalone .html files, one file = one book
+  pdf/      # PDFs that aren't manga or ranobe — same upload/converter pipeline
 ```
 
 The whole `./library` mount is read-write (not `:ro`) because the manga
-upload feature extracts archives directly into `library/manga/`.
+upload feature extracts archives directly into `library/manga/` (and PDFs
+into whichever library you pick, including `library/pdf/`).
 
 HTML book titles come from `<title>`, with optional
 `<meta name="author" content="...">` and

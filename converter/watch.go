@@ -6,24 +6,42 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// runWatch is a persistent worker: each tick drains yomekuro's upload job
-// queue, then scans the library for manually-created "<name>-in" folders with
-// no DB row.
+// runWatch is a persistent worker with two independent poll loops — the
+// DB-backed upload queue and the manual-folder scan — so neither blocks the
+// other (a multi-hour manga OCR job used to stall every other upload behind
+// it). Each loop also dispatches its own jobs as they're found rather than
+// processing them one at a time in sequence: a fast text-PDF job (no OCR
+// needed, see pdf.go) finishes in seconds regardless of how many slow OCR
+// jobs are already running. The only thing still serialized is the GPU
+// itself, via gpuMu in convert.go.
 func runWatch(pool *pgxpool.Pool, library string, interval time.Duration) {
 	slog.Info("watch mode started", "library", library, "poll_interval", interval)
 	ctx := context.Background()
+
+	go func() {
+		for {
+			drainQueue(ctx, pool)
+			time.Sleep(interval)
+		}
+	}()
+
 	for {
-		drainQueue(ctx, pool)
 		scanManualFolders(ctx, pool, library)
 		time.Sleep(interval)
 	}
 }
 
+// drainQueue claims every pending job and hands each to its own goroutine
+// immediately, rather than waiting for one to finish before claiming the
+// next — claiming is a fast atomic DB update either way, so this just
+// removes the "next job waits for the previous job's whole conversion"
+// bottleneck.
 func drainQueue(ctx context.Context, pool *pgxpool.Pool) {
 	for {
 		j, err := claimNextJob(ctx, pool)
@@ -34,36 +52,40 @@ func drainQueue(ctx context.Context, pool *pgxpool.Pool) {
 		if j == nil {
 			return // queue empty
 		}
+		go processQueuedJob(ctx, pool, j)
+	}
+}
 
-		slog.Info("watch: converting", "job", j.Name, "input", j.InputPath, "output", j.OutputPath)
-		onVolume := func(volume string) {
-			if err := updateJobVolume(ctx, pool, j.ID, volume); err != nil {
-				slog.Warn("watch: update current volume failed", "job", j.Name, "err", err)
-			}
+func processQueuedJob(ctx context.Context, pool *pgxpool.Pool, j *job) {
+	slog.Info("watch: converting", "job", j.Name, "input", j.InputPath, "output", j.OutputPath)
+	onVolume := func(volume string) {
+		if err := updateJobVolume(ctx, pool, j.ID, volume); err != nil {
+			slog.Warn("watch: update current volume failed", "job", j.Name, "err", err)
 		}
-		ok, fail, err := Convert(j.InputPath, j.OutputPath, "", false, onVolume)
+	}
+	ok, fail, err := Convert(j.InputPath, j.OutputPath, "", false, onVolume)
+	switch {
+	case err != nil || fail > 0 || ok == 0:
+		msg := "no volumes were converted"
 		switch {
 		case err != nil:
-			slog.Error("watch: conversion failed", "job", j.Name, "err", err)
-			markJobFailed(ctx, pool, j.ID, err.Error())
-			cleanupFailedJob(j.Name, j.InputPath, j.OutputPath)
-		case fail > 0 || ok == 0:
-			msg := "no volumes were converted"
-			if fail > 0 {
-				msg = "some volumes failed to convert"
-			}
-			slog.Error("watch: conversion unsuccessful", "job", j.Name, "detail", msg)
-			markJobFailed(ctx, pool, j.ID, msg)
-			// A partial failure (some volumes did convert) leaves real output in
-			// place — only wipe the staging folders when *nothing* succeeded,
-			// otherwise this would delete a partially-finished manga.
-			if ok == 0 {
-				cleanupFailedJob(j.Name, j.InputPath, j.OutputPath)
-			}
-		default:
-			slog.Info("watch: conversion done", "job", j.Name, "volumes", ok)
-			markJobDone(ctx, pool, j.ID)
+			msg = err.Error()
+		case fail > 0:
+			msg = "some volumes failed to convert"
 		}
+		slog.Error("watch: conversion unsuccessful", "job", j.Name, "detail", msg)
+		markJobFailed(ctx, pool, j.ID, msg)
+		// ok > 0 here means some volumes (e.g. text-layer PDFs, which never
+		// touch mokuro) already finished successfully before the error/failure
+		// — a text-PDF volume can succeed independently of an OCR volume
+		// failing in the same job. Only wipe the staging folders when
+		// *nothing* succeeded, otherwise this would delete real output.
+		if ok == 0 {
+			cleanupFailedJob(j.Name, j.InputPath, j.OutputPath)
+		}
+	default:
+		slog.Info("watch: conversion done", "job", j.Name, "volumes", ok)
+		markJobDone(ctx, pool, j.ID)
 	}
 }
 
@@ -79,17 +101,46 @@ func cleanupFailedJob(name, inputPath, outputPath string) {
 	}
 }
 
+// manualInProgress tracks input dirs currently being converted by a
+// goroutine spawned from scanManualFoldersIn. A manual folder has no DB row
+// to atomically claim (unlike the upload queue), so without this a folder
+// mid-conversion would look identical to one that just hasn't started yet
+// (manualFolderNeedsConversion can't tell "in progress" from "not started")
+// and get relaunched on every subsequent poll tick.
+var (
+	manualInProgressMu sync.Mutex
+	manualInProgress   = map[string]bool{}
+)
+
+// scanManualFolders looks for "<name>-in" folders one level below library —
+// library itself is just the mount point (/library); the actual registered
+// libraries are its subfolders (ranobe/manga/html, see cmd/yomekuro/main.go),
+// and that's where a manually staged "-in" folder actually lives.
 func scanManualFolders(ctx context.Context, pool *pgxpool.Pool, library string) {
-	entries, err := os.ReadDir(library)
+	roots, err := os.ReadDir(library)
 	if err != nil {
 		slog.Error("watch: cannot read library", "err", err)
+		return
+	}
+	for _, root := range roots {
+		if !root.IsDir() {
+			continue
+		}
+		scanManualFoldersIn(ctx, pool, filepath.Join(library, root.Name()))
+	}
+}
+
+func scanManualFoldersIn(ctx context.Context, pool *pgxpool.Pool, libraryRoot string) {
+	entries, err := os.ReadDir(libraryRoot)
+	if err != nil {
+		slog.Error("watch: cannot read library root", "root", libraryRoot, "err", err)
 		return
 	}
 	for _, e := range entries {
 		if !e.IsDir() || !strings.HasSuffix(e.Name(), "-in") {
 			continue
 		}
-		inputDir := filepath.Join(library, e.Name())
+		inputDir := filepath.Join(libraryRoot, e.Name())
 
 		tracked, err := jobExistsForPath(ctx, pool, inputDir)
 		if err != nil {
@@ -101,16 +152,31 @@ func scanManualFolders(ctx context.Context, pool *pgxpool.Pool, library string) 
 		}
 
 		name := strings.TrimSuffix(e.Name(), "-in")
-		outputDir := filepath.Join(library, name)
+		outputDir := filepath.Join(libraryRoot, name)
 
 		if !manualFolderNeedsConversion(inputDir, outputDir) {
 			continue
 		}
 
-		slog.Info("watch: converting manual folder", "input", inputDir, "output", outputDir)
-		if _, _, err := Convert(inputDir, outputDir, "", false, nil); err != nil {
-			slog.Error("watch: manual folder conversion failed", "input", inputDir, "err", err)
+		manualInProgressMu.Lock()
+		if manualInProgress[inputDir] {
+			manualInProgressMu.Unlock()
+			continue
 		}
+		manualInProgress[inputDir] = true
+		manualInProgressMu.Unlock()
+
+		slog.Info("watch: converting manual folder", "input", inputDir, "output", outputDir)
+		go func() {
+			defer func() {
+				manualInProgressMu.Lock()
+				delete(manualInProgress, inputDir)
+				manualInProgressMu.Unlock()
+			}()
+			if _, _, err := Convert(inputDir, outputDir, "", false, nil); err != nil {
+				slog.Error("watch: manual folder conversion failed", "input", inputDir, "err", err)
+			}
+		}()
 	}
 }
 
@@ -127,15 +193,16 @@ func manualFolderNeedsConversion(inputDir, outputDir string) bool {
 	return len(epubs) < volumes
 }
 
-// countVolumes mirrors isFlatVolume's detection in convert.go: a folder of
-// images directly is one volume, a folder of subdirectories is one volume per
-// subdirectory (ignoring mokuro's own "_ocr" cache dir).
+// countVolumes mirrors isFlatVolume's detection in convert.go, plus
+// processPDFVolumes': a folder of images directly is one volume, a folder of
+// subdirectories is one volume per subdirectory (ignoring mokuro's own
+// "_ocr" cache dir), and each top-level ".pdf" file is its own volume too.
 func countVolumes(dir string) (int, error) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return 0, err
 	}
-	subdirs, hasImage := 0, false
+	subdirs, pdfs, hasImage := 0, 0, false
 	for _, e := range entries {
 		if e.IsDir() {
 			if e.Name() != "_ocr" {
@@ -146,10 +213,12 @@ func countVolumes(dir string) (int, error) {
 		switch strings.ToLower(filepath.Ext(e.Name())) {
 		case ".jpg", ".jpeg", ".png", ".webp", ".jxl":
 			hasImage = true
+		case ".pdf":
+			pdfs++
 		}
 	}
 	if subdirs == 0 && hasImage {
-		return 1, nil
+		return 1 + pdfs, nil
 	}
-	return subdirs, nil
+	return subdirs + pdfs, nil
 }

@@ -9,6 +9,18 @@ converter/converter
 data/
 library/*
 !library/.gitkeep
+!library/ranobe
+!library/manga
+!library/html
+!library/pdf
+library/ranobe/*
+!library/ranobe/.gitkeep
+library/manga/*
+!library/manga/.gitkeep
+library/html/*
+!library/html/.gitkeep
+library/pdf/*
+!library/pdf/.gitkeep
 
 # epub files (large media)
 **/*.epub

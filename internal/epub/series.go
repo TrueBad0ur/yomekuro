@@ -71,15 +71,29 @@ func parseSeries(doc *etree.Document, filePath, libraryPath string) (name string
 var numRe = regexp.MustCompile(`\d+(?:\.\d+)?`)
 
 // indexFromFilename extracts the last number from a filename as series index.
+// Volume numbers in Japanese release filenames are often fullwidth digits
+// (｛０-９｝, U+FF10-FF19, e.g. "（１２）") rather than ASCII — \d alone
+// wouldn't match those, silently leaving every volume at index 0.
 func indexFromFilename(filename string) float64 {
 	ext := filepath.Ext(filename)
-	base := strings.TrimSuffix(filename, ext)
+	base := toHalfwidthDigits(strings.TrimSuffix(filename, ext))
 	nums := numRe.FindAllString(base, -1)
 	if len(nums) == 0 {
 		return 0
 	}
 	f, _ := strconv.ParseFloat(nums[len(nums)-1], 64)
 	return f
+}
+
+// toHalfwidthDigits maps fullwidth digits (U+FF10-U+FF19) to ASCII '0'-'9',
+// leaving everything else untouched.
+func toHalfwidthDigits(s string) string {
+	return strings.Map(func(r rune) rune {
+		if r >= '０' && r <= '９' {
+			return r - '０' + '0'
+		}
+		return r
+	}, s)
 }
 
 // computePageCount uses the Readium method: 1 page per 1024 bytes of compressed spine content.

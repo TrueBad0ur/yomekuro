@@ -7,7 +7,15 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 )
+
+// gpuMu serializes every mokuro invocation across all callers (the DB-backed
+// upload queue and the manual-folder scan now both run their own jobs
+// concurrently — see watch.go — but there's still only one GPU). Work that
+// never touches mokuro (JXL conversion, text-layer PDF extraction) doesn't
+// need this and runs fully in parallel.
+var gpuMu sync.Mutex
 
 // Convert runs mokuro OCR over input (a folder of volume subdirectories, or a
 // single flat folder of images treated as one volume) and writes one EPUB per
@@ -20,6 +28,23 @@ func Convert(input, output, volume string, noCache bool, onVolume func(string)) 
 
 	if err := convertJXLPages(input); err != nil {
 		return 0, 0, fmt.Errorf("convert jxl pages: %w", err)
+	}
+
+	pdfTextOK, err := processPDFVolumes(input, output)
+	if err != nil {
+		return 0, 0, fmt.Errorf("process pdf volumes: %w", err)
+	}
+	ok += pdfTextOK
+
+	// A folder of nothing but text-layer PDFs is fully handled above with no
+	// image volumes left for mokuro — skip straight to done instead of
+	// erroring out on an empty input dir.
+	empty, err := isEmptyDir(input)
+	if err != nil {
+		return ok, 0, fmt.Errorf("read input dir: %w", err)
+	}
+	if empty {
+		return ok, 0, nil
 	}
 
 	// mokuroDir is what --parent_dir points at; volumesBaseDir holds the actual
@@ -35,7 +60,7 @@ func Convert(input, output, volume string, noCache bool, onVolume func(string)) 
 	} else {
 		flat, err := isFlatVolume(input)
 		if err != nil {
-			return 0, 0, fmt.Errorf("read input dir: %w", err)
+			return ok, 0, fmt.Errorf("read input dir: %w", err)
 		}
 		if flat {
 			// Name after output, not input — input is "<name>-in" for uploads,
@@ -43,17 +68,17 @@ func Convert(input, output, volume string, noCache bool, onVolume func(string)) 
 			volumeName := filepath.Base(output)
 			absInput, err := filepath.Abs(input)
 			if err != nil {
-				return 0, 0, fmt.Errorf("resolve input path: %w", err)
+				return ok, 0, fmt.Errorf("resolve input path: %w", err)
 			}
 			tmpParent, err := os.MkdirTemp("", "mokuro-flat-")
 			if err != nil {
-				return 0, 0, fmt.Errorf("create temp dir: %w", err)
+				return ok, 0, fmt.Errorf("create temp dir: %w", err)
 			}
 			defer os.RemoveAll(tmpParent)
 			// python-fire mis-tokenizes paths with spaces as positional args, so
 			// symlink into a temp dir and point --parent_dir at that instead.
 			if err := os.Symlink(absInput, filepath.Join(tmpParent, volumeName)); err != nil {
-				return 0, 0, fmt.Errorf("create flat-volume symlink: %w", err)
+				return ok, 0, fmt.Errorf("create flat-volume symlink: %w", err)
 			}
 			mokuroDir = tmpParent
 			volumesBaseDir = tmpParent
@@ -63,8 +88,11 @@ func Convert(input, output, volume string, noCache bool, onVolume func(string)) 
 		}
 	}
 
-	if err := runMokuro(mokuroDir, volumeDirs, noCache, onVolume); err != nil {
-		return 0, 0, fmt.Errorf("mokuro: %w", err)
+	gpuMu.Lock()
+	err = runMokuro(mokuroDir, volumeDirs, noCache, onVolume)
+	gpuMu.Unlock()
+	if err != nil {
+		return ok, 0, fmt.Errorf("mokuro: %w", err)
 	}
 
 	// collect .mokuro files: either the specific one or all in mokuroDir
@@ -74,7 +102,7 @@ func Convert(input, output, volume string, noCache bool, onVolume func(string)) 
 	} else {
 		entries, err := os.ReadDir(mokuroDir)
 		if err != nil {
-			return 0, 0, fmt.Errorf("read input dir: %w", err)
+			return ok, 0, fmt.Errorf("read input dir: %w", err)
 		}
 		for _, e := range entries {
 			if !e.IsDir() && strings.HasSuffix(e.Name(), ".mokuro") {
@@ -127,6 +155,23 @@ func isFlatVolume(dir string) (bool, error) {
 		}
 	}
 	return hasImage, nil
+}
+
+// isEmptyDir reports whether dir has nothing left for mokuro to process —
+// used after processPDFVolumes to detect an input made entirely of
+// text-layer PDFs, which are already fully handled by that point.
+func isEmptyDir(dir string) (bool, error) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return false, err
+	}
+	for _, e := range entries {
+		if e.IsDir() && e.Name() == "_ocr" {
+			continue
+		}
+		return false, nil
+	}
+	return true, nil
 }
 
 // convertJXLPages decodes .jxl page images to .png via djxl (libjxl-tools) and

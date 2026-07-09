@@ -14,6 +14,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         libgl1 \
         libglib2.0-0 \
         libjxl-tools \
+        poppler-utils \
+        poppler-data \
     && rm -rf /var/lib/apt/lists/*
 
 # Silence "sending unauthenticated requests to the HF Hub" — we don't need a

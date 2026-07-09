@@ -66,11 +66,7 @@ async function loadLibraries() {
 
   list.innerHTML = '';
 
-  const librarySelect = document.getElementById('upload-library');
-  if (librarySelect) {
-    librarySelect.innerHTML = (libs.items || [])
-      .map(l => `<option value="${l.id}">${esc(l.name)}</option>`).join('');
-  }
+  renderUploadLibraryPicker(libs.items || []);
 
   for (const lib of (libs.items || [])) {
     const card = document.createElement('div');
@@ -152,6 +148,57 @@ document.getElementById('btn-add-library').addEventListener('click', async () =>
 const uploadProgressRow   = document.getElementById('upload-progress-row');
 const uploadProgressFill  = document.getElementById('upload-progress-fill');
 const uploadProgressLabel = document.getElementById('upload-progress-label');
+const uploadLibraryPicker = document.getElementById('upload-library-picker');
+const uploadDropzone      = document.getElementById('upload-dropzone');
+const uploadFileInput     = document.getElementById('upload-file');
+const uploadFilenameLabel = document.getElementById('upload-filename');
+
+let selectedUploadLibraryId = '';
+
+function renderUploadLibraryPicker(libraries) {
+  uploadLibraryPicker.innerHTML = '';
+  if (!selectedUploadLibraryId && libraries.length > 0) {
+    selectedUploadLibraryId = libraries[0].id;
+  }
+  for (const lib of libraries) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'library-pick-btn';
+    btn.classList.toggle('active', lib.id === selectedUploadLibraryId);
+    btn.textContent = lib.name;
+    btn.addEventListener('click', () => {
+      selectedUploadLibraryId = lib.id;
+      uploadLibraryPicker.querySelectorAll('.library-pick-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+    });
+    uploadLibraryPicker.appendChild(btn);
+  }
+}
+
+function setUploadFile(file) {
+  uploadFilenameLabel.textContent = file ? file.name : 'No file selected';
+  uploadFilenameLabel.classList.toggle('has-file', !!file);
+}
+
+uploadFileInput.addEventListener('change', () => setUploadFile(uploadFileInput.files[0] || null));
+
+['dragenter', 'dragover'].forEach(evt => {
+  uploadDropzone.addEventListener(evt, (e) => {
+    e.preventDefault();
+    uploadDropzone.classList.add('dragover');
+  });
+});
+['dragleave', 'dragend'].forEach(evt => {
+  uploadDropzone.addEventListener(evt, () => uploadDropzone.classList.remove('dragover'));
+});
+uploadDropzone.addEventListener('drop', (e) => {
+  e.preventDefault();
+  uploadDropzone.classList.remove('dragover');
+  const file = e.dataTransfer.files[0];
+  if (!file) return;
+  uploadFileInput.files = e.dataTransfer.files;
+  setUploadFile(file);
+});
 
 function setUploadProgress(pct, label, indeterminate) {
   uploadProgressRow.hidden = false;
@@ -169,9 +216,9 @@ function hideUploadProgress() {
 document.getElementById('btn-upload').addEventListener('click', () => {
   const errEl = document.getElementById('upload-error');
   errEl.hidden = true;
-  const libraryId = document.getElementById('upload-library').value;
+  const libraryId = selectedUploadLibraryId;
   const name = document.getElementById('upload-name').value.trim();
-  const fileInput = document.getElementById('upload-file');
+  const fileInput = uploadFileInput;
   const file = fileInput.files[0];
   if (!libraryId || !file) {
     errEl.textContent = 'Pick a library and a file';
@@ -198,10 +245,10 @@ document.getElementById('btn-upload').addEventListener('click', () => {
   });
 
   xhr.upload.addEventListener('load', () => {
-    // Transfer done; server is now extracting the archive and queuing the
-    // job (no byte-level progress for that part) — show a moving bar instead
-    // of a stalled 100% one.
-    setUploadProgress(100, 'Extracting archive…', true);
+    // Transfer done; server is now extracting/staging and queuing the job
+    // (no byte-level progress for that part) — show a moving bar instead of
+    // a stalled 100% one.
+    setUploadProgress(100, 'Processing…', true);
   });
 
   xhr.addEventListener('load', () => {
@@ -209,13 +256,13 @@ document.getElementById('btn-upload').addEventListener('click', () => {
     if (xhr.status >= 200 && xhr.status < 300) {
       hideUploadProgress();
       document.getElementById('upload-name').value = '';
-      fileInput.value = '';
+      fileInput.value = ''; setUploadFile(null);
       loadConversionJobs();
       return;
     }
     hideUploadProgress();
     document.getElementById('upload-name').value = '';
-    fileInput.value = '';
+    fileInput.value = ''; setUploadFile(null);
     let msg = 'Upload failed';
     try { msg = JSON.parse(xhr.responseText).error || msg; } catch {}
     errEl.textContent = msg;
@@ -226,7 +273,7 @@ document.getElementById('btn-upload').addEventListener('click', () => {
     btn.disabled = false;
     hideUploadProgress();
     document.getElementById('upload-name').value = '';
-    fileInput.value = '';
+    fileInput.value = ''; setUploadFile(null);
     errEl.textContent = 'Upload failed';
     errEl.hidden = false;
   });

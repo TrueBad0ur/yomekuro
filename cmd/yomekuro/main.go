@@ -45,11 +45,12 @@ func main() {
 		slog.Warn("YOMEKURO_ADMIN_PASSWORD not set — admin will not be created automatically")
 	}
 
-	// All three live under one /library mount, one subfolder each.
+	// All four live under one /library mount, one subfolder each.
 	for _, def := range []struct{ name, path string }{
 		{"Ranobe", "/library/ranobe"},
 		{"Manga", "/library/manga"},
 		{"HTML", "/library/html"},
+		{"PDF", "/library/pdf"},
 	} {
 		if _, err := db.EnsureDefaultLibrary(ctx, pool, def.name, def.path); err != nil {
 			slog.Error("EnsureDefaultLibrary", "err", err)

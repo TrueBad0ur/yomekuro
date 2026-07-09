@@ -44,18 +44,37 @@
 
       <section class="settings-section" id="upload">
         <h2 class="settings-section-title">Upload manga</h2>
-        <p style="color:var(--text-dim);font-size:.82rem;margin:0 0 .6rem">
-          Upload a .zip/.tar/.tar.gz/.tar.xz/.7z/.rar of raw manga page images (one subfolder
-          per volume, or images directly for a single volume). It's extracted, queued for
-          GPU OCR conversion, and the resulting EPUBs appear in the library once done.
+        <p class="upload-hint">
+          A .zip/.tar/.tar.gz/.tar.xz/.7z/.rar of raw page images (one subfolder per volume,
+          or images directly for a single volume), or a .pdf. Text-layer PDFs convert
+          straight to EPUB with no OCR; scanned PDFs and archives are queued for GPU OCR.
+          The resulting EPUBs appear in the library once done.
         </p>
-        <div class="settings-row" style="gap:.5rem;flex-wrap:wrap">
-          <select id="upload-library" class="user-input"></select>
-          <input id="upload-name" type="text" placeholder="Name (optional, from filename)" class="user-input">
-          <input id="upload-file" type="file" accept=".zip,.tar,.tar.gz,.tgz,.tar.xz,.txz,.7z,.rar">
-          <button id="btn-upload">Upload</button>
+
+        <div class="upload-field">
+          <span class="upload-field-label">Library</span>
+          <div id="upload-library-picker" class="library-picker"></div>
+        </div>
+
+        <label id="upload-dropzone" class="upload-dropzone" for="upload-file">
+          <input id="upload-file" type="file" accept=".zip,.tar,.tar.gz,.tgz,.tar.xz,.txz,.7z,.rar,.pdf" hidden>
+          <span class="upload-dropzone-icon">&#8593;</span>
+          <span class="upload-dropzone-text">
+            <span class="upload-dropzone-title">Drop a file here, or click to browse</span>
+            <span class="upload-dropzone-sub" id="upload-filename">No file selected</span>
+          </span>
+        </label>
+
+        <div class="upload-field">
+          <span class="upload-field-label">Name</span>
+          <input id="upload-name" type="text" placeholder="Optional — taken from the filename" class="user-input" style="width:100%">
+        </div>
+
+        <div class="upload-actions">
+          <button id="btn-upload" class="upload-submit-btn">Upload</button>
           <p class="login-error" id="upload-error" hidden></p>
         </div>
+
         <div id="upload-progress-row" class="upload-progress-row" hidden>
           <div class="upload-progress-bar"><div id="upload-progress-fill" class="upload-progress-fill"></div></div>
           <span id="upload-progress-label" class="upload-progress-label"></span>

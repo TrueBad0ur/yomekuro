@@ -20,12 +20,18 @@ type imgEntry struct {
 	mediaType string
 }
 
-var reVolSuffix = regexp.MustCompile(`(?i)\s+(v\.?\s*|vol\.?\s*|volume\s*)?\d+$`)
+// Matches either "... v02"/"... Vol 3"/"... 4" (whitespace + optional word +
+// digits at the end) or a Japanese-style "...（05）" parenthesized volume
+// number — matched against the halfwidth-normalized name (see
+// toHalfwidthVolume), since real-world tankobon filenames use fullwidth
+// digits and fullwidth parens (１２３, （ ）), not ASCII ones.
+var reVolSuffix = regexp.MustCompile(`(?i)(\s+(v\.?\s*|vol\.?\s*|volume\s*)?\d+|\(\s*\d+\s*\))\s*$`)
 
 // seriesName strips trailing volume number from a volume name.
-// "Dungeon Meshi v01" → "Dungeon Meshi", "SAO Vol 3" → "SAO"
+// "Dungeon Meshi v01" → "Dungeon Meshi", "SAO Vol 3" → "SAO",
+// "葬送のフリーレン（０５）" → "葬送のフリーレン"
 func seriesName(volumeName string) string {
-	s := reVolSuffix.ReplaceAllString(strings.TrimSpace(volumeName), "")
+	s := reVolSuffix.ReplaceAllString(strings.TrimSpace(toHalfwidthVolume(volumeName)), "")
 	s = strings.TrimSpace(s)
 	if s == "" {
 		return volumeName
@@ -35,7 +41,7 @@ func seriesName(volumeName string) string {
 
 // volumeIndex extracts a numeric index from a volume name, e.g. "Dungeon Meshi v02" → 2.
 func volumeIndex(name string) float64 {
-	matches := reVolSuffix.FindString(name)
+	matches := reVolSuffix.FindString(toHalfwidthVolume(name))
 	nums := regexp.MustCompile(`\d+`).FindString(matches)
 	if nums == "" {
 		return 1
@@ -45,6 +51,23 @@ func volumeIndex(name string) float64 {
 		return 1
 	}
 	return float64(n)
+}
+
+// toHalfwidthVolume maps fullwidth digits (U+FF10-U+FF19) and fullwidth
+// parens (U+FF08/09) to their ASCII equivalents, leaving everything else
+// untouched.
+func toHalfwidthVolume(s string) string {
+	return strings.Map(func(r rune) rune {
+		switch {
+		case r >= '０' && r <= '９':
+			return r - '０' + '0'
+		case r == '（':
+			return '('
+		case r == '）':
+			return ')'
+		}
+		return r
+	}, s)
 }
 
 func buildEPUB(vol MokuroVolume, inputDir, outPath string) error {

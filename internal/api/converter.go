@@ -40,6 +40,14 @@ func isSupportedArchive(filename string) bool {
 	return matchedArchiveExt(filename) != ""
 }
 
+// isPDF reports whether filename is a standalone PDF upload — handled
+// separately from archives: no extraction, just staged as-is for
+// processPDFVolumes (converter/pdf.go) to route to OCR or direct text
+// extraction depending on whether it already has a text layer.
+func isPDF(filename string) bool {
+	return strings.EqualFold(filepath.Ext(filename), ".pdf")
+}
+
 // sanitizeName rejects path separators and leading dots so the resulting
 // "<name>-in"/"<name>" folders can't escape the library or collide with the
 // hidden-file convention.
@@ -79,8 +87,8 @@ func (s *Server) uploadArchive(w http.ResponseWriter, r *http.Request) {
 	}
 	defer file.Close()
 
-	if !isSupportedArchive(header.Filename) {
-		respondError(w, http.StatusBadRequest, "unsupported archive format (need .zip/.tar/.tar.gz/.tar.xz/.7z/.rar)")
+	if !isSupportedArchive(header.Filename) && !isPDF(header.Filename) {
+		respondError(w, http.StatusBadRequest, "unsupported format (need .zip/.tar/.tar.gz/.tar.xz/.7z/.rar or .pdf)")
 		return
 	}
 
@@ -115,19 +123,6 @@ func (s *Server) uploadArchive(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	tmpArchive, err := os.CreateTemp("", "upload-*"+matchedArchiveExt(header.Filename))
-	if err != nil {
-		respondError(w, http.StatusInternalServerError, "cannot buffer upload")
-		return
-	}
-	defer os.Remove(tmpArchive.Name())
-	if _, err := io.Copy(tmpArchive, file); err != nil {
-		tmpArchive.Close()
-		respondError(w, http.StatusInternalServerError, "cannot save upload: "+err.Error())
-		return
-	}
-	tmpArchive.Close()
-
 	// Staging dir lives inside lib.Path itself (not the system temp dir) so the
 	// final os.Rename into place is same-filesystem and atomic — /library is
 	// typically its own bind-mounted volume, and a cross-device rename would fail.
@@ -138,13 +133,42 @@ func (s *Server) uploadArchive(w http.ResponseWriter, r *http.Request) {
 	}
 	defer os.RemoveAll(stagingDir)
 
-	if err := archive.Extract(tmpArchive.Name(), stagingDir); err != nil {
-		respondError(w, http.StatusBadRequest, "extraction failed: "+err.Error())
-		return
-	}
-	if !containsImage(stagingDir) {
-		respondError(w, http.StatusBadRequest, "archive contains no page images")
-		return
+	if isPDF(header.Filename) {
+		// No extraction — staged as-is; processPDFVolumes (converter/pdf.go)
+		// decides OCR vs direct text extraction once the job runs.
+		dst, err := os.Create(filepath.Join(stagingDir, name+".pdf"))
+		if err != nil {
+			respondError(w, http.StatusInternalServerError, "cannot save upload: "+err.Error())
+			return
+		}
+		if _, err := io.Copy(dst, file); err != nil {
+			dst.Close()
+			respondError(w, http.StatusInternalServerError, "cannot save upload: "+err.Error())
+			return
+		}
+		dst.Close()
+	} else {
+		tmpArchive, err := os.CreateTemp("", "upload-*"+matchedArchiveExt(header.Filename))
+		if err != nil {
+			respondError(w, http.StatusInternalServerError, "cannot buffer upload")
+			return
+		}
+		defer os.Remove(tmpArchive.Name())
+		if _, err := io.Copy(tmpArchive, file); err != nil {
+			tmpArchive.Close()
+			respondError(w, http.StatusInternalServerError, "cannot save upload: "+err.Error())
+			return
+		}
+		tmpArchive.Close()
+
+		if err := archive.Extract(tmpArchive.Name(), stagingDir); err != nil {
+			respondError(w, http.StatusBadRequest, "extraction failed: "+err.Error())
+			return
+		}
+		if !containsSupportedContent(stagingDir) {
+			respondError(w, http.StatusBadRequest, "archive contains no page images or PDFs")
+			return
+		}
 	}
 
 	if err := os.Rename(stagingDir, inDir); err != nil {
@@ -161,14 +185,14 @@ func (s *Server) uploadArchive(w http.ResponseWriter, r *http.Request) {
 	respond(w, map[string]string{"name": name, "status": "pending"})
 }
 
-func containsImage(dir string) bool {
+func containsSupportedContent(dir string) bool {
 	found := false
 	filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
 		if err != nil || found || d.IsDir() {
 			return nil
 		}
 		switch strings.ToLower(filepath.Ext(d.Name())) {
-		case ".jpg", ".jpeg", ".png", ".webp", ".jxl":
+		case ".jpg", ".jpeg", ".png", ".webp", ".jxl", ".pdf":
 			found = true
 		}
 		return nil
@@ -213,9 +237,19 @@ func (s *Server) deleteConversionJob(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if err := db.DeleteConversionJob(r.Context(), s.db, id); err != nil {
+	inputPath, outputPath, err := db.DeleteConversionJob(r.Context(), s.db, id)
+	if err != nil {
 		respondError(w, http.StatusInternalServerError, err.Error())
 		return
+	}
+	// Clean up the staged files too, not just the DB row — left in place, a
+	// "<name>-in" folder with no job row looks to converter-worker exactly
+	// like an unclaimed manual conversion and gets silently picked back up.
+	if inputPath != "" {
+		os.RemoveAll(inputPath)
+	}
+	if outputPath != "" {
+		os.RemoveAll(outputPath)
 	}
 	w.WriteHeader(http.StatusNoContent)
 }
