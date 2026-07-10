@@ -303,16 +303,20 @@ func collapseSingleRoot(dir string) error {
 		}
 
 		// Only collapse if the subdirectory itself holds further subdirectories
-		// (a multi-volume wrapper) — if it holds images directly, it's a
+		// (a multi-volume wrapper) or multiple top-level PDFs (each PDF is its
+		// own volume, same idea) — if it holds images directly, it's a
 		// legitimate single volume named after that folder.
-		hasSubdir := false
+		hasSubdir, pdfCount := false, 0
 		for _, e := range innerEntries {
 			if e.IsDir() {
 				hasSubdir = true
 				break
 			}
+			if strings.EqualFold(filepath.Ext(e.Name()), ".pdf") {
+				pdfCount++
+			}
 		}
-		if !hasSubdir {
+		if !hasSubdir && pdfCount < 2 {
 			return nil
 		}
 

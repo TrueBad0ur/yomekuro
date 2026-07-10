@@ -64,6 +64,26 @@ func updateJobVolume(ctx context.Context, pool *pgxpool.Pool, id, volume string)
 	return err
 }
 
+// stopRequested reports whether id's row has been flagged for cancellation
+// (see internal/db.RequestStopConversionJob) — polled periodically while a
+// job's mokuro subprocess is running, see watch.go.
+func stopRequested(ctx context.Context, pool *pgxpool.Pool, id string) (bool, error) {
+	var stop bool
+	err := pool.QueryRow(ctx,
+		`SELECT stop_requested FROM conversion_jobs WHERE id=$1::uuid`, id,
+	).Scan(&stop)
+	if err == pgx.ErrNoRows {
+		return false, nil
+	}
+	return stop, err
+}
+
+func markJobStopped(ctx context.Context, pool *pgxpool.Pool, id string) error {
+	_, err := pool.Exec(ctx,
+		`UPDATE conversion_jobs SET status='stopped', current_volume='', updated_at=NOW() WHERE id=$1::uuid`, id)
+	return err
+}
+
 // jobExistsForPath reports whether any conversion_jobs row (any status)
 // already references inputPath — used to keep the manual "<name>-in" filesystem
 // scan (see runWatch) from reprocessing a folder the DB queue owns.

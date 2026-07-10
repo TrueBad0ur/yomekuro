@@ -53,6 +53,25 @@ func volumeIndex(name string) float64 {
 	return float64(n)
 }
 
+var reLeadingNum = regexp.MustCompile(`^\s*0*(\d+)`)
+
+// leadingVolumeIndex extracts a leading number from name, e.g.
+// "1 Kage no koibito" → 1. Unlike volumeIndex (trailing "vNN"/"（NN）"
+// patterns, for series where each volume's own name embeds the series
+// title), this handles anthology-style naming where the number comes first
+// and the rest of the name is an unrelated per-item title.
+func leadingVolumeIndex(name string) (float64, bool) {
+	m := reLeadingNum.FindStringSubmatch(toHalfwidthVolume(name))
+	if m == nil {
+		return 0, false
+	}
+	n, err := strconv.Atoi(m[1])
+	if err != nil || n == 0 {
+		return 0, false
+	}
+	return float64(n), true
+}
+
 // toHalfwidthVolume maps fullwidth digits (U+FF10-U+FF19) and fullwidth
 // parens (U+FF08/09) to their ASCII equivalents, leaving everything else
 // untouched.
@@ -145,8 +164,14 @@ func containerXML() string {
 func contentOPF(vol MokuroVolume, images []imgEntry) string {
 	var b strings.Builder
 	now := time.Now().UTC().Format("2006-01-02T15:04:05Z")
-	series := seriesName(vol.Volume)
-	idx := volumeIndex(vol.Volume)
+	series := vol.Series
+	if series == "" {
+		series = seriesName(vol.Volume)
+	}
+	idx := vol.SeriesIndex
+	if idx == 0 {
+		idx = volumeIndex(vol.Volume)
+	}
 
 	b.WriteString(`<?xml version="1.0" encoding="UTF-8"?>
 <package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="uid" xml:lang="ja">
@@ -308,11 +333,16 @@ func writeLineDiv(b *strings.Builder, text string, coords [][]float64, vertical 
 		fs = 16
 	}
 
-	// No explicit width/height: white-space:nowrap + font-size derived from
-	// axis-length/char-count reproduces the original extent without it.
+	// Explicit width/height pin the box to the OCR-detected extent regardless
+	// of the client's font metrics. Relying on shrink-to-fit (font-size alone)
+	// assumes every character advances exactly 1em, which real CJK fonts don't
+	// guarantee for punctuation (、。」 etc.) — the error accumulates over a
+	// long line and the selection box drifts from the real glyphs, worse the
+	// longer the vertical line. overflow:hidden keeps it visually pinned even
+	// if the client's rendered text would otherwise want more space.
 	style := fmt.Sprintf(
-		"position:absolute;left:%dpx;top:%dpx;font-size:%.1fpx;line-height:1;white-space:nowrap;color:transparent;cursor:text;-webkit-user-select:text;user-select:text;",
-		iround(minX), iround(minY), fs,
+		"position:absolute;left:%dpx;top:%dpx;width:%dpx;height:%dpx;overflow:hidden;font-size:%.1fpx;line-height:1;white-space:nowrap;color:transparent;cursor:text;-webkit-user-select:text;user-select:text;",
+		iround(minX), iround(minY), iround(lw), iround(lh), fs,
 	)
 	if vertical {
 		style += "writing-mode:vertical-rl;"

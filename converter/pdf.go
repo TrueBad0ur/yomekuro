@@ -31,8 +31,9 @@ const textPDFMinJapaneseFraction = 0.3
 // volume folder is removed so mokuro never sees it; a scanned PDF (no text
 // layer) is left as a plain page-image folder for the normal mokuro pipeline
 // to OCR. Returns how many volumes it fully finished via the text path — the
-// caller's own ok count.
-func processPDFVolumes(input, output string) (textOK int, err error) {
+// caller's own ok count. series/seriesIndex, if series is non-empty,
+// override the volume's own name-derived series (see decideSeries).
+func processPDFVolumes(input, output, series string, seriesIndex map[string]float64) (textOK int, err error) {
 	entries, err := os.ReadDir(input)
 	if err != nil {
 		return 0, err
@@ -70,6 +71,8 @@ func processPDFVolumes(input, output string) (textOK int, err error) {
 		if err != nil {
 			return textOK, fmt.Errorf("build text volume %s: %w", pdfPath, err)
 		}
+		vol.Series = series
+		vol.SeriesIndex = seriesIndex[name]
 		if err := os.Remove(pdfPath); err != nil {
 			return textOK, fmt.Errorf("remove %s: %w", pdfPath, err)
 		}

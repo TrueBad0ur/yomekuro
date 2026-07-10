@@ -56,6 +56,21 @@
           <div id="upload-library-picker" class="library-picker"></div>
         </div>
 
+        <label class="upload-checkbox-row">
+          <input id="upload-add-existing" type="checkbox">
+          Add to an existing book instead of creating a new one
+        </label>
+
+        <div class="upload-field" id="upload-name-field">
+          <span class="upload-field-label">Name</span>
+          <input id="upload-name" type="text" placeholder="Optional — taken from the filename" class="user-input" style="width:100%">
+        </div>
+
+        <div class="upload-field" id="upload-series-field" hidden>
+          <span class="upload-field-label">Book</span>
+          <select id="upload-series-picker" class="user-input" style="width:100%"></select>
+        </div>
+
         <label id="upload-dropzone" class="upload-dropzone" for="upload-file">
           <input id="upload-file" type="file" accept=".zip,.tar,.tar.gz,.tgz,.tar.xz,.txz,.7z,.rar,.pdf" hidden>
           <span class="upload-dropzone-icon">&#8593;</span>
@@ -64,11 +79,6 @@
             <span class="upload-dropzone-sub" id="upload-filename">No file selected</span>
           </span>
         </label>
-
-        <div class="upload-field">
-          <span class="upload-field-label">Name</span>
-          <input id="upload-name" type="text" placeholder="Optional — taken from the filename" class="user-input" style="width:100%">
-        </div>
 
         <div class="upload-actions">
           <button id="btn-upload" class="upload-submit-btn">Upload</button>

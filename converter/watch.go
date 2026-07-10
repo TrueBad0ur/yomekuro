@@ -56,15 +56,61 @@ func drainQueue(ctx context.Context, pool *pgxpool.Pool) {
 	}
 }
 
+// stopPollInterval controls how often a running job checks whether it's been
+// flagged for cancellation (see stopRequested) — same cadence as Convert's
+// own incremental-EPUB poll, no reason for it to be more eager than that.
+const stopPollInterval = 2 * time.Second
+
 func processQueuedJob(ctx context.Context, pool *pgxpool.Pool, j *job) {
 	slog.Info("watch: converting", "job", j.Name, "input", j.InputPath, "output", j.OutputPath)
+
+	// Cancelling jobCtx kills the mokuro subprocess (see Convert/runMokuro) —
+	// this goroutine is the only thing that ever cancels it, by polling
+	// stop_requested (set by the UI's "Stop" button, internal/api/converter.go)
+	// while the conversion is running. The deferred cancel() below also
+	// guarantees this goroutine exits promptly once Convert returns on its
+	// own, canceled or not.
+	jobCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	go func() {
+		ticker := time.NewTicker(stopPollInterval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-jobCtx.Done():
+				return
+			case <-ticker.C:
+				stop, err := stopRequested(ctx, pool, j.ID)
+				if err != nil {
+					slog.Warn("watch: check stop_requested failed", "job", j.Name, "err", err)
+					continue
+				}
+				if stop {
+					slog.Info("watch: stop requested, cancelling", "job", j.Name)
+					cancel()
+					return
+				}
+			}
+		}
+	}()
+
 	onVolume := func(volume string) {
 		if err := updateJobVolume(ctx, pool, j.ID, volume); err != nil {
 			slog.Warn("watch: update current volume failed", "job", j.Name, "err", err)
 		}
 	}
-	ok, fail, err := Convert(j.InputPath, j.OutputPath, "", false, onVolume)
+	ok, fail, err := Convert(jobCtx, j.InputPath, j.OutputPath, "", false, onVolume)
+
 	switch {
+	case jobCtx.Err() != nil:
+		// Cancelled via the stop-poller above, not a parent-context timeout
+		// (ctx here is always context.Background() — see runWatch) — a
+		// deliberate user action, not a failure.
+		slog.Info("watch: conversion stopped", "job", j.Name, "volumes_done", ok)
+		markJobStopped(ctx, pool, j.ID)
+		if ok == 0 {
+			cleanupFailedJob(j.Name, j.InputPath, j.OutputPath)
+		}
 	case err != nil || fail > 0 || ok == 0:
 		msg := "no volumes were converted"
 		switch {
@@ -173,7 +219,7 @@ func scanManualFoldersIn(ctx context.Context, pool *pgxpool.Pool, libraryRoot st
 				delete(manualInProgress, inputDir)
 				manualInProgressMu.Unlock()
 			}()
-			if _, _, err := Convert(inputDir, outputDir, "", false, nil); err != nil {
+			if _, _, err := Convert(context.Background(), inputDir, outputDir, "", false, nil); err != nil {
 				slog.Error("watch: manual folder conversion failed", "input", inputDir, "err", err)
 			}
 		}()

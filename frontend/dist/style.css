@@ -807,6 +807,16 @@ body.page-settings { max-width: 1080px; margin: 0 auto; padding: 0 1.5rem 3rem; 
   margin-bottom: 0.4rem;
 }
 
+.upload-checkbox-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.85rem;
+  color: var(--text);
+  margin-bottom: 0.9rem;
+  cursor: pointer;
+}
+
 .library-picker { display: flex; gap: 0.4rem; flex-wrap: wrap; }
 .library-pick-btn {
   padding: 0.4rem 1rem;

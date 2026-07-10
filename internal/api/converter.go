@@ -92,14 +92,48 @@ func (s *Server) uploadArchive(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	name := r.FormValue("name")
-	if name == "" {
-		name = stripArchiveExt(header.Filename)
-	}
-	name, err = sanitizeName(name)
-	if err != nil {
-		respondError(w, http.StatusBadRequest, "invalid name")
-		return
+	// "existing_series" switches this from "stage a new book" to "add one
+	// more volume/PDF to a book that's already in the library" — same
+	// pipeline either way (extract-or-stage, queue, convert), just landing
+	// in the existing output folder instead of a fresh one. See
+	// converter/convert.go's decideSeries/hasExistingEPUBs: a single new
+	// volume landing in a folder that already has other EPUBs in it
+	// automatically joins that folder's series, no extra flag needed there.
+	existingSeries := strings.TrimSpace(r.FormValue("existing_series"))
+	addToExisting := existingSeries != ""
+
+	var name, inDir, outDir string
+	if addToExisting {
+		name, err = sanitizeName(existingSeries)
+		if err != nil {
+			respondError(w, http.StatusBadRequest, "invalid book name")
+			return
+		}
+		outDir = filepath.Join(lib.Path, name)
+		if info, err := os.Stat(outDir); err != nil || !info.IsDir() {
+			respondError(w, http.StatusNotFound, "book not found in this library")
+			return
+		}
+	} else {
+		name = r.FormValue("name")
+		if name == "" {
+			name = stripArchiveExt(header.Filename)
+		}
+		name, err = sanitizeName(name)
+		if err != nil {
+			respondError(w, http.StatusBadRequest, "invalid name")
+			return
+		}
+		outDir = filepath.Join(lib.Path, name)
+		if _, err := os.Stat(outDir); err == nil {
+			respondError(w, http.StatusConflict, "a folder with this name already exists in the library")
+			return
+		}
+		inDir = filepath.Join(lib.Path, name+"-in")
+		if _, err := os.Stat(inDir); err == nil {
+			respondError(w, http.StatusConflict, "a manga with this name is already uploaded")
+			return
+		}
 	}
 
 	taken, err := db.ConversionJobNameTaken(r.Context(), s.db, libID, name)
@@ -112,31 +146,47 @@ func (s *Server) uploadArchive(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	inDir := filepath.Join(lib.Path, name+"-in")
-	outDir := filepath.Join(lib.Path, name)
-	if _, err := os.Stat(inDir); err == nil {
-		respondError(w, http.StatusConflict, "a manga with this name is already uploaded")
-		return
-	}
-	if _, err := os.Stat(outDir); err == nil {
-		respondError(w, http.StatusConflict, "a folder with this name already exists in the library")
-		return
-	}
-
 	// Staging dir lives inside lib.Path itself (not the system temp dir) so the
-	// final os.Rename into place is same-filesystem and atomic — /library is
-	// typically its own bind-mounted volume, and a cross-device rename would fail.
-	stagingDir, err := os.MkdirTemp(lib.Path, ".upload-staging-*")
+	// final move into place is same-filesystem and atomic — /library is
+	// typically its own bind-mounted volume, and a cross-device rename would
+	// fail. For a new book this becomes inDir (the persistent "<name>-in"
+	// staging folder); for "add to existing" there's no meaningful fixed name
+	// for it (the target folder — outDir — already exists under "name"), so
+	// it just keeps its randomized temp name.
+	stagingPrefix := ".upload-staging-*"
+	if addToExisting {
+		stagingPrefix = name + "-add-*-in"
+	}
+	stagingDir, err := os.MkdirTemp(lib.Path, stagingPrefix)
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, "cannot create staging dir: "+err.Error())
 		return
 	}
-	defer os.RemoveAll(stagingDir)
+	keepStaging := false
+	defer func() {
+		if !keepStaging {
+			os.RemoveAll(stagingDir)
+		}
+	}()
 
 	if isPDF(header.Filename) {
 		// No extraction — staged as-is; processPDFVolumes (converter/pdf.go)
-		// decides OCR vs direct text extraction once the job runs.
-		dst, err := os.Create(filepath.Join(stagingDir, name+".pdf"))
+		// decides OCR vs direct text extraction once the job runs. Named
+		// after the upload's own filename, not the job/series name — for
+		// "add to existing", `name` is the target book, not this one new
+		// volume's own title.
+		volName, err := sanitizeName(stripArchiveExt(header.Filename))
+		if err != nil {
+			respondError(w, http.StatusBadRequest, "invalid file name")
+			return
+		}
+		if addToExisting {
+			if _, err := os.Stat(filepath.Join(outDir, volName+".epub")); err == nil {
+				respondError(w, http.StatusConflict, "this book already has a volume with that name")
+				return
+			}
+		}
+		dst, err := os.Create(filepath.Join(stagingDir, volName+".pdf"))
 		if err != nil {
 			respondError(w, http.StatusInternalServerError, "cannot save upload: "+err.Error())
 			return
@@ -171,7 +221,13 @@ func (s *Server) uploadArchive(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	if err := os.Rename(stagingDir, inDir); err != nil {
+	if addToExisting {
+		// stagingDir's randomized name already is the final input path —
+		// outDir (the target book) already exists, there's no separate
+		// "<name>-in" to rename it to.
+		inDir = stagingDir
+		keepStaging = true
+	} else if err := os.Rename(stagingDir, inDir); err != nil {
 		respondError(w, http.StatusInternalServerError, "cannot move extracted files: "+err.Error())
 		return
 	}
@@ -207,6 +263,7 @@ type conversionJobDTO struct {
 	Status        string `json:"status"`
 	Error         string `json:"error,omitempty"`
 	CurrentVolume string `json:"current_volume,omitempty"`
+	StopRequested bool   `json:"stop_requested,omitempty"`
 	UpdatedAt     string `json:"updated_at"`
 }
 
@@ -226,30 +283,54 @@ func (s *Server) listConversionJobs(w http.ResponseWriter, r *http.Request) {
 			Status:        j.Status,
 			Error:         j.Error,
 			CurrentVolume: j.CurrentVolume,
+			StopRequested: j.StopRequested,
 			UpdatedAt:     j.UpdatedAt.UTC().Format("2006-01-02T15:04:05Z"),
 		}
 	}
 	respond(w, map[string]any{"items": dtos})
 }
 
+// deleteConversionJob stops or removes a job depending on its current state:
+//
+//   - pending/done/failed/stopped: nothing is actively reading the staged
+//     files right now, so it's safe to delete the row and clean up
+//     immediately (see DeleteConversionJob's own doc comment for why only
+//     input_path, never output_path, gets removed).
+//   - running: a converter-worker goroutine has a mokuro subprocess actively
+//     reading from input_path *right now*. Deleting the row and calling
+//     os.RemoveAll on it here would race that subprocess — mid-batch volumes
+//     started disappearing out from under it, which is exactly the bug this
+//     replaces. Instead this only flags stop_requested; converter-worker
+//     polls that flag, cancels the subprocess cleanly, and does the actual
+//     row deletion + cleanup itself once the process has genuinely exited
+//     (converter/watch.go's processQueuedJob).
 func (s *Server) deleteConversionJob(w http.ResponseWriter, r *http.Request) {
 	id, ok := parseID(w, chi.URLParam(r, "id"))
 	if !ok {
 		return
 	}
-	inputPath, outputPath, err := db.DeleteConversionJob(r.Context(), s.db, id)
+	j, err := db.GetConversionJob(r.Context(), s.db, id)
+	if err != nil {
+		respondError(w, http.StatusNotFound, "job not found")
+		return
+	}
+
+	if j.Status == "running" {
+		if err := db.RequestStopConversionJob(r.Context(), s.db, id); err != nil {
+			respondError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		w.WriteHeader(http.StatusAccepted)
+		return
+	}
+
+	inputPath, _, err := db.DeleteConversionJob(r.Context(), s.db, id)
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	// Clean up the staged files too, not just the DB row — left in place, a
-	// "<name>-in" folder with no job row looks to converter-worker exactly
-	// like an unclaimed manual conversion and gets silently picked back up.
 	if inputPath != "" {
 		os.RemoveAll(inputPath)
-	}
-	if outputPath != "" {
-		os.RemoveAll(outputPath)
 	}
 	w.WriteHeader(http.StatusNoContent)
 }

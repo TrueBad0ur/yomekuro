@@ -76,9 +76,10 @@ CREATE TABLE conversion_jobs (
     name        TEXT NOT NULL,
     input_path  TEXT NOT NULL,
     output_path TEXT NOT NULL,
-    status      TEXT NOT NULL DEFAULT 'pending', -- pending | running | done | failed
+    status      TEXT NOT NULL DEFAULT 'pending', -- pending | running | done | failed | stopped
     error       TEXT NOT NULL DEFAULT '',
     current_volume TEXT NOT NULL DEFAULT '',
+    stop_requested BOOLEAN NOT NULL DEFAULT false,
     created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );

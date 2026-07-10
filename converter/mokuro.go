@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"log/slog"
 	"os"
@@ -22,6 +23,13 @@ type MokuroVolume struct {
 	Volume     string       `json:"volume"`
 	VolumeUUID string       `json:"volume_uuid"`
 	Pages      []MokuroPage `json:"pages"`
+
+	// Series/SeriesIndex, set by Convert (not mokuro's own JSON — hence no
+	// json tag), override the per-volume-name-derived series/index in
+	// contentOPF. Used when a batch's volumes don't share a common
+	// "Name vNN"-style naming pattern — see decideSeries in convert.go.
+	Series      string
+	SeriesIndex float64
 }
 
 type MokuroPage struct {
@@ -99,7 +107,11 @@ func (t *progressThrottleWriter) emit(line []byte) error {
 	return err
 }
 
-func runMokuro(inputDir string, volumeDirs []string, noCache bool, onVolume func(string)) error {
+// runMokuro runs mokuro OCR. ctx cancellation kills the subprocess
+// (exec.CommandContext) — used to implement "Stop" on a running job, see
+// watch.go's stop-poller goroutine — and skips the retry loop, since a
+// cancellation is a deliberate stop, not a transient failure worth retrying.
+func runMokuro(ctx context.Context, inputDir string, volumeDirs []string, noCache bool, onVolume func(string)) error {
 	// --no-cache for specific volumes: clear just their cached results, since
 	// mokuro checks the .mokuro file's existence to skip "already processed".
 	if noCache && len(volumeDirs) > 0 {
@@ -129,12 +141,17 @@ func runMokuro(inputDir string, volumeDirs []string, noCache bool, onVolume func
 
 	var err error
 	for attempt := 1; attempt <= mokuroRetries; attempt++ {
-		cmd := exec.Command("python", args...)
+		cmd := exec.CommandContext(ctx, "python", args...)
 		cmd.Stdout = &progressThrottleWriter{dst: os.Stdout, every: progressEvery}
 		cmd.Stderr = &progressThrottleWriter{dst: os.Stderr, every: progressEvery, onVolume: onVolume}
 		slog.Info("exec", "cmd", cmd.String(), "attempt", attempt)
 		if err = cmd.Run(); err == nil {
 			return nil
+		}
+		if ctx.Err() != nil {
+			// Cancelled (Stop requested) — a deliberate stop, not a transient
+			// failure, so don't burn through retries waiting it out.
+			return ctx.Err()
 		}
 		if attempt < mokuroRetries {
 			slog.Warn("mokuro failed, retrying", "attempt", attempt, "err", err)

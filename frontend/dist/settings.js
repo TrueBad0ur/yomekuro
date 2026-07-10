@@ -152,6 +152,10 @@ const uploadLibraryPicker = document.getElementById('upload-library-picker');
 const uploadDropzone      = document.getElementById('upload-dropzone');
 const uploadFileInput     = document.getElementById('upload-file');
 const uploadFilenameLabel = document.getElementById('upload-filename');
+const uploadAddExisting   = document.getElementById('upload-add-existing');
+const uploadNameField     = document.getElementById('upload-name-field');
+const uploadSeriesField   = document.getElementById('upload-series-field');
+const uploadSeriesPicker  = document.getElementById('upload-series-picker');
 
 let selectedUploadLibraryId = '';
 
@@ -170,10 +174,33 @@ function renderUploadLibraryPicker(libraries) {
       selectedUploadLibraryId = lib.id;
       uploadLibraryPicker.querySelectorAll('.library-pick-btn').forEach(b => b.classList.remove('active'));
       btn.classList.add('active');
+      loadUploadSeriesPicker();
     });
     uploadLibraryPicker.appendChild(btn);
   }
+  loadUploadSeriesPicker();
 }
+
+async function loadUploadSeriesPicker() {
+  if (!uploadAddExisting.checked || !selectedUploadLibraryId) return;
+  uploadSeriesPicker.innerHTML = '<option>Loading…</option>';
+  try {
+    const data = await fetch(`/api/series?library=${selectedUploadLibraryId}`).then(r => r.json());
+    const items = data.items || [];
+    uploadSeriesPicker.innerHTML = items.length === 0
+      ? '<option value="">No books in this library</option>'
+      : items.map(s => `<option value="${esc(s.name)}">${esc(s.name)} (${s.book_count})</option>`).join('');
+  } catch {
+    uploadSeriesPicker.innerHTML = '<option value="">Failed to load</option>';
+  }
+}
+
+uploadAddExisting.addEventListener('change', () => {
+  const on = uploadAddExisting.checked;
+  uploadNameField.hidden = on;
+  uploadSeriesField.hidden = !on;
+  if (on) loadUploadSeriesPicker();
+});
 
 function setUploadFile(file) {
   uploadFilenameLabel.textContent = file ? file.name : 'No file selected';
@@ -217,7 +244,9 @@ document.getElementById('btn-upload').addEventListener('click', () => {
   const errEl = document.getElementById('upload-error');
   errEl.hidden = true;
   const libraryId = selectedUploadLibraryId;
+  const addExisting = uploadAddExisting.checked;
   const name = document.getElementById('upload-name').value.trim();
+  const existingSeries = uploadSeriesPicker.value;
   const fileInput = uploadFileInput;
   const file = fileInput.files[0];
   if (!libraryId || !file) {
@@ -225,10 +254,19 @@ document.getElementById('btn-upload').addEventListener('click', () => {
     errEl.hidden = false;
     return;
   }
+  if (addExisting && !existingSeries) {
+    errEl.textContent = 'Pick a book to add to';
+    errEl.hidden = false;
+    return;
+  }
 
   const form = new FormData();
   form.append('library_id', libraryId);
-  if (name) form.append('name', name);
+  if (addExisting) {
+    form.append('existing_series', existingSeries);
+  } else if (name) {
+    form.append('name', name);
+  }
   form.append('file', file);
 
   const btn = document.getElementById('btn-upload');
@@ -256,6 +294,9 @@ document.getElementById('btn-upload').addEventListener('click', () => {
     if (xhr.status >= 200 && xhr.status < 300) {
       hideUploadProgress();
       document.getElementById('upload-name').value = '';
+      uploadAddExisting.checked = false;
+      uploadNameField.hidden = false;
+      uploadSeriesField.hidden = true;
       fileInput.value = ''; setUploadFile(null);
       loadConversionJobs();
       return;
@@ -294,16 +335,26 @@ async function loadConversionJobs() {
     list.innerHTML = '';
     return;
   }
-  list.innerHTML = jobs.map(j => `
+  list.innerHTML = jobs.map(j => {
+    // A pending/running job is still doing (or about to do) real work —
+    // clicking the button there requests a clean stop (converter-worker
+    // cancels the mokuro subprocess itself; see internal/api/converter.go's
+    // deleteConversionJob). A terminal job (done/failed/stopped) has nothing
+    // left to stop, so the same button just clears its row.
+    const stoppable = j.status === 'pending' || j.status === 'running';
+    const label = j.stop_requested ? 'Stopping…' : (stoppable ? 'Stop' : 'Remove');
+    return `
     <div class="library-card">
       <div class="library-card-name">${esc(j.name)}</div>
       ${j.status === 'running' && j.current_volume ? `<div class="job-current-volume">${esc(j.current_volume)}</div>` : ''}
       <div class="library-card-footer">
         <span class="library-card-count job-status-${esc(j.status)}">${esc(j.status)}</span>
         ${j.error ? `<span style="color:#e07070;font-size:.78rem">${esc(j.error)}</span>` : ''}
-        <button class="job-delete-btn" data-id="${esc(j.id)}" title="Remove from list">Delete</button>
+        <button class="job-delete-btn" data-id="${esc(j.id)}" ${j.stop_requested ? 'disabled' : ''}
+          title="${stoppable ? 'Stop this conversion' : 'Remove from list'}">${label}</button>
       </div>
-    </div>`).join('');
+    </div>`;
+  }).join('');
 }
 
 document.getElementById('conversion-jobs').addEventListener('click', async (e) => {
