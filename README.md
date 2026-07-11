@@ -330,6 +330,17 @@ generation) works in practice. Don't override across RDNA generations.
 - Keyboard: `←` / `→` — prev/next page; `↑` / `↓` — scroll within zoomed page; `Ctrl +` / `Ctrl -` / `Ctrl 0` — zoom in/out/reset
 - Spread view: toggle **Spread** button in the nav bar
 
+### Text lookup (Yomitan / 10ten)
+
+On manga and PDF pages the OCR'd (or PDF-extracted) text is an invisible,
+selectable layer laid directly over the printed characters, so pop-up
+dictionaries — [Yomitan](https://github.com/themoeway/yomitan), 10ten Japanese
+Reader — look words up on hover with no white text box getting in the way
+(unlike mokuro's own reader, which reveals the recognized text on hover). Two
+positioning paths keep the selection on the glyphs instead of drifting beside
+them: mokuro-OCR'd pages place each line from the detector's own line geometry;
+PDF text-layer pages use the PDF's own coordinates.
+
 ---
 
 ## Libraries

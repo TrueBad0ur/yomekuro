@@ -30,6 +30,13 @@ type MokuroVolume struct {
 	// "Name vNN"-style naming pattern — see decideSeries in convert.go.
 	Series      string
 	SeriesIndex float64
+
+	// OCR marks a volume whose line quads came from mokuro's comic-text-detector
+	// (parseMokuroFile), as opposed to pdftotext bounding boxes (buildTextVolume).
+	// The two produce systematically different quad padding, so the overlay
+	// positioning in writeLineDiv only applies the detector-calibrated insets
+	// when this is set. Not from mokuro's JSON — hence no tag.
+	OCR bool
 }
 
 type MokuroPage struct {
@@ -172,5 +179,6 @@ func parseMokuroFile(path string) (MokuroVolume, error) {
 	if err := json.NewDecoder(f).Decode(&vol); err != nil {
 		return MokuroVolume{}, err
 	}
+	vol.OCR = true
 	return vol, nil
 }

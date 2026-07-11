@@ -3,6 +3,7 @@ package main
 import (
 	"archive/zip"
 	"fmt"
+	"image"
 	"io"
 	"net/url"
 	"os"
@@ -135,7 +136,14 @@ func buildEPUB(vol MokuroVolume, inputDir, outPath string) error {
 
 	for i, page := range vol.Pages {
 		imgHref := fmt.Sprintf("../images/%s", url.PathEscape(filepath.Base(page.ImgPath)))
-		xhtml := pageXHTML(i+1, page, imgHref)
+		// For OCR volumes, decode the page image so overlay glyphs can be
+		// snapped onto their printed ink (writeLineDivVerticalPerGlyph). nil
+		// (non-OCR, or an undecodable format) falls back to uniform placement.
+		var gray *image.Gray
+		if vol.OCR {
+			gray = decodeGray(filepath.Join(inputDir, vol.Volume, filepath.FromSlash(page.ImgPath)))
+		}
+		xhtml := pageXHTML(i+1, page, imgHref, vol.OCR, gray)
 		if err := addText(zw, fmt.Sprintf("OPS/pages/p%04d.xhtml", i+1), xhtml); err != nil {
 			return err
 		}
@@ -249,7 +257,7 @@ func navXHTML(vol MokuroVolume) string {
 	return b.String()
 }
 
-func pageXHTML(num int, page MokuroPage, imgHref string) string {
+func pageXHTML(num int, page MokuroPage, imgHref string, ocr bool, gray *image.Gray) string {
 	w, h := page.ImgWidth, page.ImgHeight
 	if w == 0 {
 		w = 1350
@@ -284,7 +292,7 @@ func pageXHTML(num int, page MokuroPage, imgHref string) string {
 		// glyphs land exactly on the image characters (correct Yomitan hit-testing).
 		if len(blk.LinesCoords) == len(blk.Lines) && len(blk.Lines) > 0 {
 			for li, line := range blk.Lines {
-				writeLineDiv(&b, line, blk.LinesCoords[li], blk.Vertical)
+				writeLineDiv(&b, line, blk.LinesCoords[li], blk.Vertical, ocr, gray)
 			}
 			continue
 		}
@@ -298,13 +306,60 @@ func pageXHTML(num int, page MokuroPage, imgHref string) string {
 	return b.String()
 }
 
+// runeAdvanceEm is a single glyph's advance in em units: fullwidth glyphs ~1em,
+// halfwidth/ASCII ~0.55em.
+func runeAdvanceEm(r rune) float64 {
+	if r < 0x2000 || (r >= 0xff61 && r <= 0xff9f) {
+		return 0.55
+	}
+	return 1
+}
+
+// advanceEm approximates a string's rendered advance in em units (its width at
+// font-size 1). Used instead of a raw rune count so that punctuation, halfwidth
+// kana, and Latin don't skew the derived font size on a mixed-script line.
+func advanceEm(text string) float64 {
+	var adv float64
+	for _, r := range text {
+		adv += runeAdvanceEm(r)
+	}
+	return adv
+}
+
+// Overlay-positioning constants for mokuro-OCR line quads, calibrated by
+// measuring, over 300+ vertical lines / 16 pages, where the printed ink
+// actually sits inside each comic-text-detector line quad (rendered-text bbox
+// vs image ink, headless Chromium + Noto Sans JP):
+//
+//   - the detector pads the reading-START of a quad by ~0.21 glyph and its
+//     reading-END by ~0.05 glyph (ascender/line-gap slack), so anchoring text
+//     at the quad start (top for vertical) lands it ~0.2 glyph too early and
+//     sizing it to the full quad length overshoots — hence ocrReadStartPad /
+//     ocrReadEndPad, applied as fractions of the fitted glyph size;
+//   - the ink centre sits ~0.10 glyph past the quad's cross centre, so the
+//     column is centred and then nudged (ocrCrossNudge).
+//
+// Only for OCR volumes: pdftotext quads (buildTextVolume) are tight to the
+// glyphs and get the plain original placement below.
+const (
+	ocrReadStartPad = 0.21
+	ocrReadEndPad   = 0.05
+	ocrCrossNudge   = 0.10
+)
+
 // writeLineDiv renders one OCR line as a transparent, positioned <div>.
-// font-size is derived from the line's own bounding box so N characters fill the
-// reading axis exactly; white-space:nowrap prevents CSS from re-wrapping columns.
-func writeLineDiv(b *strings.Builder, text string, coords [][]float64, vertical bool) {
+// white-space:nowrap keeps it a single column/row; position and font-size are
+// derived from the line's bounding box.
+func writeLineDiv(b *strings.Builder, text string, coords [][]float64, vertical, ocr bool, gray *image.Gray) {
 	text = strings.TrimSpace(text)
-	n := utf8.RuneCountInString(text)
-	if n == 0 || len(coords) == 0 {
+	if text == "" || len(coords) == 0 {
+		return
+	}
+
+	// Best path: OCR vertical line with the page image available — snap each
+	// glyph onto its printed ink (see writeLineDivVerticalPerGlyph).
+	if ocr && vertical && gray != nil {
+		writeLineDivVerticalPerGlyph(b, text, coords, gray)
 		return
 	}
 
@@ -322,30 +377,46 @@ func writeLineDiv(b *strings.Builder, text string, coords [][]float64, vertical 
 		return
 	}
 
-	// Distribute characters along the reading axis (vertical: height, horizontal: width).
-	var fs float64
-	if vertical {
-		fs = lh / float64(n)
+	var style string
+	if ocr && vertical {
+		// Detector-calibrated placement (see the ocr* constants). Reading axis
+		// is Y (height); the fitted glyph size divides the quad length by the
+		// text advance plus the two padding fractions, so the padded quad
+		// carries exactly this line's glyphs. The column is centred on the
+		// quad's X and nudged onto the ink; the text starts one start-pad down
+		// from the quad top.
+		adv := advanceEm(text)
+		fs := lh / (adv + ocrReadStartPad + ocrReadEndPad)
+		if fs <= 0 {
+			fs = 16
+		}
+		left := (minX+maxX)/2 - fs/2 + ocrCrossNudge*fs
+		top := minY + ocrReadStartPad*fs
+		style = fmt.Sprintf(
+			"position:absolute;left:%dpx;top:%dpx;width:%dpx;font-size:%.1fpx;line-height:1;white-space:nowrap;color:transparent;cursor:text;-webkit-user-select:text;user-select:text;writing-mode:vertical-rl;",
+			iround(left), iround(top), iround(fs), fs,
+		)
 	} else {
-		fs = lw / float64(n)
-	}
-	if fs <= 0 {
-		fs = 16
-	}
-
-	// Explicit width/height pin the box to the OCR-detected extent regardless
-	// of the client's font metrics. Relying on shrink-to-fit (font-size alone)
-	// assumes every character advances exactly 1em, which real CJK fonts don't
-	// guarantee for punctuation (、。」 etc.) — the error accumulates over a
-	// long line and the selection box drifts from the real glyphs, worse the
-	// longer the vertical line. overflow:hidden keeps it visually pinned even
-	// if the client's rendered text would otherwise want more space.
-	style := fmt.Sprintf(
-		"position:absolute;left:%dpx;top:%dpx;width:%dpx;height:%dpx;overflow:hidden;font-size:%.1fpx;line-height:1;white-space:nowrap;color:transparent;cursor:text;-webkit-user-select:text;user-select:text;",
-		iround(minX), iround(minY), iround(lw), iround(lh), fs,
-	)
-	if vertical {
-		style += "writing-mode:vertical-rl;"
+		// Original placement: anchor at the quad's top-left, size = axis length
+		// / char count. Used for horizontal lines and pdftotext text-layer quads
+		// (which are already tight to the glyphs, so the OCR insets don't apply).
+		n := utf8.RuneCountInString(text)
+		var fs float64
+		if vertical {
+			fs = lh / float64(n)
+		} else {
+			fs = lw / float64(n)
+		}
+		if fs <= 0 {
+			fs = 16
+		}
+		style = fmt.Sprintf(
+			"position:absolute;left:%dpx;top:%dpx;font-size:%.1fpx;line-height:1;white-space:nowrap;color:transparent;cursor:text;-webkit-user-select:text;user-select:text;",
+			iround(minX), iround(minY), fs,
+		)
+		if vertical {
+			style += "writing-mode:vertical-rl;"
+		}
 	}
 	fmt.Fprintf(b, "    <div style=\"%s\">%s</div>\n", style, xmlEsc(text))
 }
