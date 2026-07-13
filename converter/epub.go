@@ -328,48 +328,90 @@ func advanceEm(text string) float64 {
 // constants put it back on the glyphs. They describe the OCR detector's
 // geometry, so they apply only to OCR volumes — pdftotext quads
 // (buildTextVolume) are already tight to the text.
+// The pads differ per orientation, so both were calibrated the same way against
+// real pages: vertical over 300+ columns, horizontal over 380+ rows. The
+// horizontal quad in particular runs ~1.7x taller than its glyphs, so anchoring
+// the row at the quad's top edge (as the plain placement does) floats every line
+// ~0.35 glyph above the print.
 const (
-	ocrReadStartPad = 0.21
-	ocrReadEndPad   = 0.05
-	ocrCrossNudge   = 0.05
+	ocrVertStartPad, ocrVertEndPad, ocrVertCrossNudge = 0.21, 0.05, 0.05
+	ocrHorStartPad, ocrHorEndPad, ocrHorCrossNudge    = 0.09, 0.05, 0.00
 
 	// A line whose own fitted size exceeds its block's median by more than this
 	// is trusted no further than the median — see blockRefFontSize.
 	ocrFontOutlier = 1.15
 )
 
-// verticalLineFontSize is the size a vertical OCR line's glyphs are fitted to:
-// the column's length (slant-aware) spread over the text's advance plus the
-// quad's two padding fractions. Returns 0 when the line can't be measured.
-func verticalLineFontSize(coords [][]float64, text string) float64 {
+func ocrPads(vertical bool) (start, end, nudge float64) {
+	if vertical {
+		return ocrVertStartPad, ocrVertEndPad, ocrVertCrossNudge
+	}
+	return ocrHorStartPad, ocrHorEndPad, ocrHorCrossNudge
+}
+
+// lineGeometry resolves an OCR line quad into the centre line of its text:
+// where the glyphs start, how far they run, the fitted glyph size, and how far
+// the line leans.
+//
+// Detector quads are often parallelograms, and a tilted one's axis-aligned bbox
+// both over-states its size and hides the lean — so the reading axis is taken
+// from the midpoints of the quad's two leading/trailing short edges instead.
+// For a vertical line those are the top and bottom edges; for a horizontal one,
+// the left and right.
+func lineGeometry(coords [][]float64, text string, vertical bool) (startX, startY, fs, deg float64, ok bool) {
 	if len(coords) != 4 {
-		return 0
+		return 0, 0, 0, 0, false
 	}
 	adv := advanceEm(strings.TrimSpace(text))
 	if adv <= 0 {
-		return 0
+		return 0, 0, 0, 0, false
 	}
-	topC, topY := (coords[0][0]+coords[1][0])/2, (coords[0][1]+coords[1][1])/2
-	botC, botY := (coords[2][0]+coords[3][0])/2, (coords[2][1]+coords[3][1])/2
-	main := math.Hypot(botC-topC, botY-topY)
+	var ax, ay, bx, by float64 // leading and trailing edge midpoints
+	if vertical {
+		ax, ay = (coords[0][0]+coords[1][0])/2, (coords[0][1]+coords[1][1])/2
+		bx, by = (coords[2][0]+coords[3][0])/2, (coords[2][1]+coords[3][1])/2
+	} else {
+		ax, ay = (coords[0][0]+coords[3][0])/2, (coords[0][1]+coords[3][1])/2
+		bx, by = (coords[1][0]+coords[2][0])/2, (coords[1][1]+coords[2][1])/2
+	}
+	main := math.Hypot(bx-ax, by-ay)
 	if main <= 0 {
-		return 0
+		return 0, 0, 0, 0, false
 	}
-	return main / (adv + ocrReadStartPad + ocrReadEndPad)
+	startPad, endPad, _ := ocrPads(vertical)
+	fs = main / (adv + startPad + endPad)
+	if fs <= 0 {
+		return 0, 0, 0, 0, false
+	}
+	// Text starts one start-pad along the line's own axis.
+	startX = ax + startPad*fs*(bx-ax)/main
+	startY = ay + startPad*fs*(by-ay)/main
+
+	// Clockwise rotation that makes the div lean the way the quad does. For a
+	// vertical column that's the sideways drift of its foot; for a horizontal
+	// row, the drop of its far end.
+	var sin float64
+	if vertical {
+		sin = (ax - bx) / main
+	} else {
+		sin = (by - ay) / main
+	}
+	deg = math.Asin(math.Max(-1, math.Min(1, sin))) * 180 / math.Pi
+	return startX, startY, fs, deg, true
 }
 
-// blockRefFontSize is the median fitted size of a block's vertical lines, or 0
-// when there are too few to be meaningful.
+// blockRefFontSize is the median fitted size of a block's lines, or 0 when
+// there are too few to be meaningful.
 //
 // Print sets a whole block at one size, so the median is the block's true glyph
-// size. A line's own fitted size divides its column by the number of characters
+// size. A line's own fitted size divides its extent by the number of characters
 // the OCR *read* — so when the OCR drops characters (one real case: it read a
 // parenthesised year as 3 characters fewer than printed) the size comes out
 // far too big and the line is stretched right off the glyphs. Capping such
 // outliers at the block's median keeps their glyphs on the print; the line then
 // simply ends short instead of skewing along its whole length.
 func blockRefFontSize(blk MokuroBlock, ocr bool) float64 {
-	if !ocr || !blk.Vertical {
+	if !ocr {
 		return 0
 	}
 	var sizes []float64
@@ -378,7 +420,7 @@ func blockRefFontSize(blk MokuroBlock, ocr bool) float64 {
 		if utf8.RuneCountInString(strings.TrimSpace(line)) < 6 {
 			continue
 		}
-		if fs := verticalLineFontSize(blk.LinesCoords[li], line); fs > 0 {
+		if _, _, fs, _, ok := lineGeometry(blk.LinesCoords[li], line, blk.Vertical); ok {
 			sizes = append(sizes, fs)
 		}
 	}
@@ -415,39 +457,32 @@ func writeLineDiv(b *strings.Builder, text string, coords [][]float64, vertical,
 		return
 	}
 
-	if adv := advanceEm(text); ocr && vertical && len(coords) == 4 && adv > 0 {
-		// Slant-aware column geometry: detector quads are often parallelograms,
-		// and a tilted one's axis-aligned bbox both over-states its width and
-		// hides its lean (one real case: bbox 105px wide for a 75px column that
-		// leans 30px left over its length). Take the column's centre line from
-		// the quad's short-edge midpoints instead, size the glyphs to the text's
-		// advance over that length, start them one start-pad in, and rotate the
-		// div so the column follows the lean — a single <div> with one text run
-		// throughout, since pop-up dictionaries must still see the line as
-		// connected text.
-		topC, topY := (coords[0][0]+coords[1][0])/2, (coords[0][1]+coords[1][1])/2
-		botC, botY := (coords[2][0]+coords[3][0])/2, (coords[2][1]+coords[3][1])/2
-		main := math.Hypot(botC-topC, botY-topY)
-		if main > 0 {
-			fs := main / (adv + ocrReadStartPad + ocrReadEndPad)
-			// An outlier against the block's own size means the OCR miscounted
-			// this line's characters; the block's median is the better bet.
-			if blockRef > 0 && fs > ocrFontOutlier*blockRef {
-				fs = blockRef
-			}
-			if fs > 0 {
-				// Text start, one start-pad along the column's own axis.
-				startX := topC + ocrReadStartPad*fs*(botC-topC)/main
-				startY := topY + ocrReadStartPad*fs*(botY-topY)/main
-				deg := math.Asin(math.Max(-1, math.Min(1, (topC-botC)/main))) * 180 / math.Pi
-				style := fmt.Sprintf(
-					"position:absolute;left:%dpx;top:%dpx;width:%dpx;font-size:%.1fpx;line-height:1;white-space:nowrap;color:transparent;cursor:text;-webkit-user-select:text;user-select:text;writing-mode:vertical-rl;transform:rotate(%.2fdeg);transform-origin:50%% 0;",
-					iround(startX+ocrCrossNudge*fs-fs/2), iround(startY), iround(fs), fs, deg,
-				)
-				fmt.Fprintf(b, "    <div style=\"%s\">%s</div>\n", style, xmlEsc(text))
-				return
-			}
+	if startX, startY, fs, deg, ok := lineGeometry(coords, text, vertical); ocr && ok {
+		// An outlier against the block's own size means the OCR miscounted this
+		// line's characters; the block's median is the better bet.
+		if blockRef > 0 && fs > ocrFontOutlier*blockRef {
+			fs = blockRef
 		}
+		_, _, nudge := ocrPads(vertical)
+		// The quad is wider/taller than the glyphs it holds, and the ink sits
+		// near the middle of that slack — so the line is centred across its own
+		// axis rather than pinned to the quad's edge, then nudged onto the ink.
+		// It stays a single <div> with one text run: pop-up dictionaries walk the
+		// DOM to assemble multi-character words, so a line must never be split.
+		var style string
+		if vertical {
+			style = fmt.Sprintf(
+				"position:absolute;left:%dpx;top:%dpx;width:%dpx;font-size:%.1fpx;line-height:1;white-space:nowrap;color:transparent;cursor:text;-webkit-user-select:text;user-select:text;writing-mode:vertical-rl;transform:rotate(%.2fdeg);transform-origin:50%% 0;",
+				iround(startX-fs/2+nudge*fs), iround(startY), iround(fs), fs, deg,
+			)
+		} else {
+			style = fmt.Sprintf(
+				"position:absolute;left:%dpx;top:%dpx;font-size:%.1fpx;line-height:1;white-space:nowrap;color:transparent;cursor:text;-webkit-user-select:text;user-select:text;transform:rotate(%.2fdeg);transform-origin:0 50%%;",
+				iround(startX), iround(startY-fs/2+nudge*fs), fs, deg,
+			)
+		}
+		fmt.Fprintf(b, "    <div style=\"%s\">%s</div>\n", style, xmlEsc(text))
+		return
 	}
 
 	// Plain placement: anchor at the quad's top-left, size = axis length / char
