@@ -9,7 +9,6 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
-	"sync"
 	"time"
 )
 
@@ -20,12 +19,31 @@ import (
 // batch, could mean nothing shows up in the library for an hour or more).
 const mokuroPollInterval = 2 * time.Second
 
-// gpuMu serializes every mokuro invocation across all callers (the DB-backed
+// gpuSem serializes every mokuro invocation across all callers (the DB-backed
 // upload queue and the manual-folder scan now both run their own jobs
 // concurrently — see watch.go — but there's still only one GPU). Work that
 // never touches mokuro (JXL conversion, text-layer PDF extraction) doesn't
 // need this and runs fully in parallel.
-var gpuMu sync.Mutex
+//
+// It's a 1-slot channel rather than a sync.Mutex because waiting for the GPU
+// has to be abandonable: a job stopped from the UI while queued behind another
+// job's multi-hour OCR run would otherwise block in Lock() until that run
+// finished, sitting there as "running"/"Stopping…" for the whole wait instead
+// of stopping. A channel can be selected against the job's context.
+var gpuSem = make(chan struct{}, 1)
+
+// acquireGPU takes the GPU slot, or gives up if ctx is cancelled first (the job
+// was stopped while queued).
+func acquireGPU(ctx context.Context) error {
+	select {
+	case gpuSem <- struct{}{}:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+func releaseGPU() { <-gpuSem }
 
 // Convert runs mokuro OCR over input (a folder of volume subdirectories, or a
 // single flat folder of images treated as one volume) and writes one EPUB per
@@ -121,8 +139,10 @@ func Convert(ctx context.Context, input, output, volume string, noCache bool, on
 	// large batch, could mean nothing appears in the library for an hour or
 	// more), poll for newly-written files while it's still running and build
 	// each one's EPUB immediately.
-	gpuMu.Lock()
-	defer gpuMu.Unlock()
+	if err := acquireGPU(ctx); err != nil {
+		return ok, fail, err
+	}
+	defer releaseGPU()
 
 	mokuroErrCh := make(chan error, 1)
 	go func() { mokuroErrCh <- runMokuro(ctx, mokuroDir, volumeDirs, noCache, onVolume) }()

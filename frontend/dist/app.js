@@ -224,13 +224,14 @@ function renderBookGrid(books) {
   for (const b of books) {
     const card = document.createElement('div');
     const pct = b.progress_pct || 0;
-    card.className = 'book-card' + (pct > 0 ? ' in-progress' : '');
+    const read = pct >= 1;
+    card.className = 'book-card' + (pct > 0 ? ' in-progress' : '') + (read ? ' read' : '');
     const progressHTML = pct > 0 ? `
       <div class="book-progress-bar-wrap">
         <div class="book-progress-bar">
           <div class="book-progress-fill" style="width:${Math.round(pct*100)}%"></div>
         </div>
-        <div class="book-progress-pct">${Math.round(pct*100)}%</div>
+        <div class="book-progress-pct">${read ? 'Read' : Math.round(pct*100) + '%'}</div>
       </div>` : '';
     card.innerHTML = `
       <a class="book-card-link" href="/reader?id=${b.id}">
@@ -242,14 +243,15 @@ function renderBookGrid(books) {
         </div>
         ${progressHTML}
       </a>
-      ${currentUser && currentUser.is_admin
-        ? `<button class="book-tag-btn" data-id="${b.id}" title="Edit genres">⋯</button>`
+      ${currentUser
+        ? `<button class="book-tag-btn" data-id="${b.id}" title="More">⋯</button>`
         : ''}`;
-    const tagBtn = card.querySelector('.book-tag-btn');
-    if (tagBtn) {
-      tagBtn.addEventListener('click', (e) => {
+    const menuBtn = card.querySelector('.book-tag-btn');
+    if (menuBtn) {
+      menuBtn.addEventListener('click', (e) => {
         e.stopPropagation();
-        openTagEditor(b.id, b.title, e.currentTarget);
+        // Re-render from the same array so the card picks up the new read state.
+        openBookMenu(b, e.currentTarget, () => renderBookGrid(books));
       });
     }
     grid.appendChild(card);
@@ -293,6 +295,69 @@ function renderTagChips() {
     });
     tagChips.appendChild(btn);
   }
+}
+
+// ── Book card "⋯" menu ────────────────────────────────────────────────────────
+
+let bookMenuPopup = null;
+
+function closeBookMenu() {
+  if (bookMenuPopup) { bookMenuPopup.remove(); bookMenuPopup = null; }
+}
+
+document.addEventListener('click', (e) => {
+  if (bookMenuPopup && !bookMenuPopup.contains(e.target)) closeBookMenu();
+});
+
+function placePopup(popup, anchorEl) {
+  const rect = anchorEl.getBoundingClientRect();
+  let left = rect.right - popup.offsetWidth;
+  if (left < 4) left = 4;
+  popup.style.left = left + 'px';
+  popup.style.top  = (rect.bottom + 6) + 'px';
+}
+
+// Read state is per-user, so every logged-in user gets this menu; genre editing
+// stays admin-only. onChanged redraws the grid once the server has confirmed.
+function openBookMenu(book, anchorEl, onChanged) {
+  closeBookMenu();
+  closeTagEditor();
+
+  const isRead = (book.progress_pct || 0) >= 1;
+  const popup = document.createElement('div');
+  popup.className = 'book-menu-popup';
+  popup.addEventListener('click', e => e.stopPropagation());
+  bookMenuPopup = popup;
+
+  popup.innerHTML = `
+    <button class="book-menu-item" data-act="read">${isRead ? 'Mark as unread' : 'Mark as read'}</button>
+    ${currentUser && currentUser.is_admin
+      ? '<button class="book-menu-item" data-act="genres">Edit genres</button>'
+      : ''}`;
+
+  popup.querySelector('[data-act="read"]').addEventListener('click', async () => {
+    const read = !isRead;
+    closeBookMenu();
+    const res = await fetch(`/api/books/${book.id}/read`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ read }),
+    });
+    if (!res.ok) return;
+    book.progress_pct = read ? 1 : 0;
+    onChanged();
+  });
+
+  const genresBtn = popup.querySelector('[data-act="genres"]');
+  if (genresBtn) {
+    genresBtn.addEventListener('click', () => {
+      closeBookMenu();
+      openTagEditor(book.id, book.title, anchorEl);
+    });
+  }
+
+  document.body.appendChild(popup);
+  placePopup(popup, anchorEl);
 }
 
 // ── Tag editor popup ──────────────────────────────────────────────────────────

@@ -342,7 +342,11 @@ async function loadConversionJobs() {
     // deleteConversionJob). A terminal job (done/failed/stopped) has nothing
     // left to stop, so the same button just clears its row.
     const stoppable = j.status === 'pending' || j.status === 'running';
-    const label = j.stop_requested ? 'Stopping…' : (stoppable ? 'Stop' : 'Remove');
+    // "Stopping…" only while the job is still live: a terminal job carrying a
+    // stale stop_requested would otherwise sit here disabled forever, with no
+    // way to clear it.
+    const stopping = j.stop_requested && stoppable;
+    const label = stopping ? 'Stopping…' : (stoppable ? 'Stop' : 'Remove');
     return `
     <div class="library-card">
       <div class="library-card-name">${esc(j.name)}</div>
@@ -350,7 +354,7 @@ async function loadConversionJobs() {
       <div class="library-card-footer">
         <span class="library-card-count job-status-${esc(j.status)}">${esc(j.status)}</span>
         ${j.error ? `<span style="color:#e07070;font-size:.78rem">${esc(j.error)}</span>` : ''}
-        <button class="job-delete-btn" data-id="${esc(j.id)}" ${j.stop_requested ? 'disabled' : ''}
+        <button class="job-delete-btn" data-id="${esc(j.id)}" ${stopping ? 'disabled' : ''}
           title="${stoppable ? 'Stop this conversion' : 'Remove from list'}">${label}</button>
       </div>
     </div>`;

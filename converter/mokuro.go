@@ -32,10 +32,9 @@ type MokuroVolume struct {
 	SeriesIndex float64
 
 	// OCR marks a volume whose line quads came from mokuro's comic-text-detector
-	// (parseMokuroFile), as opposed to pdftotext bounding boxes (buildTextVolume).
-	// The two produce systematically different quad padding, so the overlay
-	// positioning in writeLineDiv only applies the detector-calibrated insets
-	// when this is set. Not from mokuro's JSON — hence no tag.
+	// (parseMokuroFile) rather than pdftotext bounding boxes (buildTextVolume).
+	// The two pad their quads differently, so writeLineDiv only applies the
+	// detector-calibrated offsets when this is set. Not in mokuro's JSON — no tag.
 	OCR bool
 }
 

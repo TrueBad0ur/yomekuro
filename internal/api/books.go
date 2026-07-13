@@ -86,22 +86,7 @@ func (s *Server) listBooks(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Batch-fetch reading progress for current user
-	var progressMap map[[16]byte]float64
-	if user, ok := userFromCtx(r); ok && len(result.Items) > 0 {
-		ids := make([][16]byte, len(result.Items))
-		for i, b := range result.Items {
-			ids[i] = b.ID
-		}
-		progressMap, _ = db.GetProgressBatch(r.Context(), s.db, user.ID, ids)
-	}
-
-	dtos := make([]bookDTO, len(result.Items))
-	for i, b := range result.Items {
-		d := toBookDTO(b)
-		d.ProgressPct = progressMap[b.ID]
-		dtos[i] = d
-	}
+	dtos := s.bookDTOsWithProgress(r, result.Items)
 	respond(w, map[string]any{
 		"items": dtos,
 		"total": result.Total,
@@ -273,9 +258,30 @@ func (s *Server) getSeriesBooks(w http.ResponseWriter, r *http.Request) {
 		respondError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	dtos := make([]bookDTO, len(result.Items))
-	for i, b := range result.Items {
-		dtos[i] = toBookDTO(b)
+	respond(w, map[string]any{
+		"items": s.bookDTOsWithProgress(r, result.Items),
+		"total": result.Total,
+	})
+}
+
+// bookDTOsWithProgress converts books for the grid, batch-filling the current
+// user's reading progress. Every endpoint that feeds a book grid must go
+// through this — the series listing used to skip it, so a volume's progress bar
+// (and its read state) never showed on the series page.
+func (s *Server) bookDTOsWithProgress(r *http.Request, books []db.Book) []bookDTO {
+	var progressMap map[[16]byte]float64
+	if user, ok := userFromCtx(r); ok && len(books) > 0 {
+		ids := make([][16]byte, len(books))
+		for i, b := range books {
+			ids[i] = b.ID
+		}
+		progressMap, _ = db.GetProgressBatch(r.Context(), s.db, user.ID, ids)
 	}
-	respond(w, map[string]any{"items": dtos, "total": result.Total})
+	dtos := make([]bookDTO, len(books))
+	for i, b := range books {
+		d := toBookDTO(b)
+		d.ProgressPct = progressMap[b.ID]
+		dtos[i] = d
+	}
+	return dtos
 }

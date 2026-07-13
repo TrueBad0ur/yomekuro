@@ -587,7 +587,13 @@ function getProgression() {
 function saveProgress() {
   if (!manifest) return;
   const progression = getProgression();
-  const percentage  = (spineIndex + progression) / manifest.spine.length;
+  // Fixed-layout has no intra-page progression, so a page is either read or it
+  // isn't: sitting on page N means N of them are done. Counting it as
+  // (N-1)+0 instead would cap a fully-read manga at (len-1)/len — 99% — and
+  // would also knock a volume marked read straight back down on reopening.
+  const percentage = isFixedLayout
+    ? (spineIndex + 1) / manifest.spine.length
+    : (spineIndex + progression) / manifest.spine.length;
   fetch(`/api/books/${bookId}/progress`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },

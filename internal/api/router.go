@@ -66,6 +66,7 @@ func NewRouter(pool *pgxpool.Pool, sc *scanner.Scanner, w *scanner.Watcher, data
 
 		r.Get("/api/books/{id}/progress", s.getProgress)
 		r.Put("/api/books/{id}/progress", s.putProgress)
+		r.Put("/api/books/{id}/read", s.setReadState)
 
 		// Admin-only — library/user management, manga upload, and genre tagging
 		// are all settings-page features; regular users get read-only access

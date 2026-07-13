@@ -323,6 +323,34 @@ body.page-library { display: flex; min-height: 100vh; }
 }
 .book-card:hover .book-tag-btn { opacity: 1; }
 
+/* A finished volume reads as done at a glance, rather than as a full bar. */
+.book-card.read .book-progress-fill { background: var(--accent); }
+.book-card.read .book-progress-pct  { color: var(--accent); font-weight: 600; }
+
+.book-menu-popup {
+  position: fixed;
+  z-index: 500;
+  min-width: 11rem;
+  padding: 0.25rem;
+  display: flex;
+  flex-direction: column;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0,0,0,.35);
+}
+.book-menu-item {
+  padding: 0.45rem 0.6rem;
+  font-size: 0.85rem;
+  text-align: left;
+  background: none;
+  border: none;
+  border-radius: 5px;
+  color: var(--text);
+  cursor: pointer;
+}
+.book-menu-item:hover { background: var(--bg); }
+
 .tag-editor-popup {
   position: fixed;
   z-index: 500;

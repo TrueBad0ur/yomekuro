@@ -43,15 +43,20 @@ func claimNextJob(ctx context.Context, pool *pgxpool.Pool) (*job, error) {
 	return &j, nil
 }
 
+// Every terminal transition also clears stop_requested. The flag is a *request*
+// to the worker, so once the job has settled it is stale — and the UI keys its
+// "Stopping…" (disabled) button off the flag alone, so leaving it set would
+// strand the finished job in the list with no way to remove it. A job can also
+// reach done/failed just as a stop comes in, which is why they clear it too.
 func markJobDone(ctx context.Context, pool *pgxpool.Pool, id string) error {
 	_, err := pool.Exec(ctx,
-		`UPDATE conversion_jobs SET status='done', error='', current_volume='', updated_at=NOW() WHERE id=$1::uuid`, id)
+		`UPDATE conversion_jobs SET status='done', error='', current_volume='', stop_requested=false, updated_at=NOW() WHERE id=$1::uuid`, id)
 	return err
 }
 
 func markJobFailed(ctx context.Context, pool *pgxpool.Pool, id, errMsg string) error {
 	_, err := pool.Exec(ctx,
-		`UPDATE conversion_jobs SET status='failed', error=$2, current_volume='', updated_at=NOW() WHERE id=$1::uuid`, id, errMsg)
+		`UPDATE conversion_jobs SET status='failed', error=$2, current_volume='', stop_requested=false, updated_at=NOW() WHERE id=$1::uuid`, id, errMsg)
 	return err
 }
 
@@ -80,7 +85,7 @@ func stopRequested(ctx context.Context, pool *pgxpool.Pool, id string) (bool, er
 
 func markJobStopped(ctx context.Context, pool *pgxpool.Pool, id string) error {
 	_, err := pool.Exec(ctx,
-		`UPDATE conversion_jobs SET status='stopped', current_volume='', updated_at=NOW() WHERE id=$1::uuid`, id)
+		`UPDATE conversion_jobs SET status='stopped', current_volume='', stop_requested=false, updated_at=NOW() WHERE id=$1::uuid`, id)
 	return err
 }
 

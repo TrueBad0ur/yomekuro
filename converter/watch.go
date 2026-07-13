@@ -19,7 +19,7 @@ import (
 // processing them one at a time in sequence: a fast text-PDF job (no OCR
 // needed, see pdf.go) finishes in seconds regardless of how many slow OCR
 // jobs are already running. The only thing still serialized is the GPU
-// itself, via gpuMu in convert.go.
+// itself, via gpuSem in convert.go.
 func runWatch(pool *pgxpool.Pool, library string, interval time.Duration) {
 	slog.Info("watch mode started", "library", library, "poll_interval", interval)
 	ctx := context.Background()
