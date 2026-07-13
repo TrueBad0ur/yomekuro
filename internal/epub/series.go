@@ -11,10 +11,8 @@ import (
 	"github.com/beevik/etree"
 )
 
-// parseSeries resolves series name and index using three strategies in order:
-//  1. EPUB3 belongs-to-collection
-//  2. Calibre EPUB2 meta tags
-//  3. Fallback: parent directory name (relative to libraryPath)
+// Series name and index, in order: EPUB3 belongs-to-collection, Calibre's EPUB2
+// meta tags, then the parent directory name.
 func parseSeries(doc *etree.Document, filePath, libraryPath string) (name string, index float64) {
 	// Strategy 1: EPUB3 belongs-to-collection
 	for _, el := range doc.FindElements("//metadata/meta") {
@@ -70,10 +68,8 @@ func parseSeries(doc *etree.Document, filePath, libraryPath string) (name string
 
 var numRe = regexp.MustCompile(`\d+(?:\.\d+)?`)
 
-// indexFromFilename extracts the last number from a filename as series index.
-// Volume numbers in Japanese release filenames are often fullwidth digits
-// (｛０-９｝, U+FF10-FF19, e.g. "（１２）") rather than ASCII — \d alone
-// wouldn't match those, silently leaving every volume at index 0.
+// The last number in a filename, as series index. Japanese releases often use
+// fullwidth digits ("（１２）"), which \d alone silently misses.
 func indexFromFilename(filename string) float64 {
 	ext := filepath.Ext(filename)
 	base := toHalfwidthDigits(strings.TrimSuffix(filename, ext))

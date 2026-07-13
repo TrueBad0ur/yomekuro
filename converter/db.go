@@ -8,14 +8,8 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// reclaimOrphanedJobs cleans up rows the previous worker process left behind.
-//
-// Only one worker ever drains the queue, so a job still marked 'running' at
-// startup has nobody owning it: the goroutine that claimed it died with the old
-// process. Nothing would ever move it on — claimNextJob only picks up 'pending',
-// and the API refuses to delete a 'running' row (it assumes a live mokuro
-// subprocess is reading its files). The job would sit in the UI forever, and if
-// a stop had been requested it would sit there as an unremovable "Stopping…".
+// Rescues rows a dead worker left 'running': claimNextJob only takes 'pending'
+// and the API won't delete a running row, so they'd hang in the UI forever.
 func reclaimOrphanedJobs(ctx context.Context, pool *pgxpool.Pool) error {
 	// Asked to stop before the restart — honour that rather than resuming it.
 	stopped, err := pool.Exec(ctx,
@@ -43,9 +37,8 @@ func reclaimOrphanedJobs(ctx context.Context, pool *pgxpool.Pool) error {
 	return nil
 }
 
-// job is a claimed row from yomekuro's conversion_jobs table (upload-driven
-// path). id is kept as text — this module has no need for a UUID type beyond
-// passing it back in a WHERE clause.
+// A claimed row from conversion_jobs. id stays text — it's only ever passed back
+// in a WHERE clause.
 type job struct {
 	ID         string
 	Name       string
@@ -53,9 +46,8 @@ type job struct {
 	OutputPath string
 }
 
-// claimNextJob atomically claims the oldest pending job, or returns (nil, nil)
-// if the queue is empty. FOR UPDATE SKIP LOCKED lets multiple worker
-// instances poll the same table without double-processing a row.
+// Atomically claims the oldest pending job, or (nil, nil) if the queue is empty.
+// SKIP LOCKED lets several workers poll the same table safely.
 func claimNextJob(ctx context.Context, pool *pgxpool.Pool) (*job, error) {
 	var j job
 	err := pool.QueryRow(ctx, `
@@ -79,11 +71,8 @@ func claimNextJob(ctx context.Context, pool *pgxpool.Pool) (*job, error) {
 	return &j, nil
 }
 
-// Every terminal transition also clears stop_requested. The flag is a *request*
-// to the worker, so once the job has settled it is stale — and the UI keys its
-// "Stopping…" (disabled) button off the flag alone, so leaving it set would
-// strand the finished job in the list with no way to remove it. A job can also
-// reach done/failed just as a stop comes in, which is why they clear it too.
+// Terminal transitions clear stop_requested: it is a request to the worker, and
+// the UI keys its disabled "Stopping…" button off the flag alone.
 func markJobDone(ctx context.Context, pool *pgxpool.Pool, id string) error {
 	_, err := pool.Exec(ctx,
 		`UPDATE conversion_jobs SET status='done', error='', current_volume='', stop_requested=false, updated_at=NOW() WHERE id=$1::uuid`, id)
@@ -96,18 +85,15 @@ func markJobFailed(ctx context.Context, pool *pgxpool.Pool, id, errMsg string) e
 	return err
 }
 
-// updateJobVolume records which volume mokuro is currently OCR'ing, so the
-// settings UI can show progress within a multi-volume job instead of just a
-// static "running" label.
+// Records which volume mokuro is on, so the UI can show progress within a
+// multi-volume job rather than a static "running".
 func updateJobVolume(ctx context.Context, pool *pgxpool.Pool, id, volume string) error {
 	_, err := pool.Exec(ctx,
 		`UPDATE conversion_jobs SET current_volume=$2, updated_at=NOW() WHERE id=$1::uuid`, id, volume)
 	return err
 }
 
-// stopRequested reports whether id's row has been flagged for cancellation
-// (see internal/db.RequestStopConversionJob) — polled periodically while a
-// job's mokuro subprocess is running, see watch.go.
+// Whether the row is flagged for cancellation — polled while mokuro runs.
 func stopRequested(ctx context.Context, pool *pgxpool.Pool, id string) (bool, error) {
 	var stop bool
 	err := pool.QueryRow(ctx,
@@ -125,9 +111,8 @@ func markJobStopped(ctx context.Context, pool *pgxpool.Pool, id string) error {
 	return err
 }
 
-// jobExistsForPath reports whether any conversion_jobs row (any status)
-// already references inputPath — used to keep the manual "<name>-in" filesystem
-// scan (see runWatch) from reprocessing a folder the DB queue owns.
+// Whether any row already references inputPath — keeps the manual-folder scan
+// off folders the DB queue owns.
 func jobExistsForPath(ctx context.Context, pool *pgxpool.Pool, inputPath string) (bool, error) {
 	var exists bool
 	err := pool.QueryRow(ctx,

@@ -124,9 +124,8 @@ func setSessionCookie(w http.ResponseWriter, r *http.Request, token string) {
 	})
 }
 
-// isHTTPS reports whether the request reached us over TLS, directly or via a
-// reverse proxy — checked so the session cookie gets Secure without breaking
-// logins on a plain-HTTP deployment (this server has no TLS support itself).
+// Whether the request arrived over TLS, directly or via a proxy — so the session
+// cookie gets Secure without breaking logins on plain HTTP (there's no TLS here).
 func isHTTPS(r *http.Request) bool {
 	return r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https"
 }

@@ -16,13 +16,11 @@ type Config struct {
 
 	ScanOnStart bool
 
-	// JobsPollIntervalMS is how often the Settings page's conversion-job list
-	// re-fetches. Frontend JS can't read container env directly, so this is
-	// served back to it via GET /api/config.
+	// How often the Settings page re-fetches the job list. Served to the frontend
+	// via GET /api/config, since JS can't read container env.
 	JobsPollIntervalMS int
-	// ZipCacheSize is the number of open EPUB zip archives kept in the LRU
-	// cache (internal/api/content.go's zipCache) — concurrent chapter reads
-	// reuse a cached handle instead of reopening the archive.
+	// How many open EPUB zips the LRU cache holds, so concurrent chapter reads
+	// reuse a handle instead of reopening the archive.
 	ZipCacheSize int
 }
 

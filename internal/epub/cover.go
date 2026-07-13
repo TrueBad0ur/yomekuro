@@ -7,10 +7,8 @@ import (
 	"github.com/beevik/etree"
 )
 
-// extractCover implements Komga's 3-level cover detection:
-//  1. EPUB3: manifest item with properties containing "cover-image"
-//  2. EPUB2: <meta name="cover" content="id">
-//  3. Fallback: manifest item with id == "cover-image"
+// Komga's 3-level cover detection: EPUB3 "cover-image" properties, then EPUB2
+// <meta name="cover">, then a manifest item with id "cover-image".
 func extractCover(zr *zip.Reader, doc *etree.Document, manifest map[string]ManifestItem) ([]byte, string) {
 	item, ok := findCoverItem(doc, manifest)
 	if !ok {

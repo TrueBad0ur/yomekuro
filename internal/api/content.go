@@ -69,9 +69,8 @@ func newZipCache(capacity int) *zipCache {
 	}
 }
 
-// get returns a cached *zip.ReadCloser, opening it if necessary. A cached
-// reader whose hash no longer matches (file rewritten in place) is reopened.
-// Caller must NOT close the returned ReadCloser; the cache owns it.
+// A cached *zip.ReadCloser, reopened if its hash changed (file rewritten in
+// place). The cache owns it — callers must not close it.
 func (c *zipCache) get(path, hash string) (*zip.ReadCloser, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -108,7 +107,7 @@ func (c *zipCache) get(path, hash string) (*zip.ReadCloser, error) {
 	return rc, nil
 }
 
-// closeAll has no caller yet — the obvious hook for a future graceful shutdown.
+// No caller yet — the hook for a future graceful shutdown.
 //
 //nolint:unused
 func (c *zipCache) closeAll() {

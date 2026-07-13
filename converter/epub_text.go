@@ -12,13 +12,8 @@ import (
 	"sort"
 )
 
-// buildTextVolume builds a MokuroVolume for a PDF that already has a text
-// layer — same fixed-layout page-image + positioned-text-overlay shape as a
-// real mokuro OCR result (see buildEPUB), except the text and its
-// coordinates come straight from the PDF itself via `pdftotext -bbox-layout`
-// instead of an OCR model. volDir must already contain the rasterized page
-// images for this volume (see rasterizePDF) named so that sorting them
-// lexicographically matches page order.
+// A MokuroVolume for a PDF with a text layer: same shape as an OCR result, but
+// coordinates come from `pdftotext -bbox-layout`. volDir holds the raster pages.
 func buildTextVolume(pdfPath, volDir, volumeName string) (MokuroVolume, error) {
 	pages, err := parsePDFTextLayout(pdfPath)
 	if err != nil {
@@ -49,9 +44,8 @@ func buildTextVolume(pdfPath, volDir, volumeName string) (MokuroVolume, error) {
 		if err != nil {
 			return MokuroVolume{}, fmt.Errorf("read image %s: %w", images[i], err)
 		}
-		// pdftotext's bbox coordinates are in PDF points; scale them to match
-		// the actual rendered pixel size (rather than assuming the DPI passed
-		// to pdftoppm, so this can't drift out of sync with it).
+		// bbox coords are PDF points: scale to the actual rendered pixel size, not
+		// to pdftoppm's DPI, so the two can't drift apart.
 		scaleX, scaleY := float64(imgW)/p.Width, float64(imgH)/p.Height
 
 		vol.Pages[i] = MokuroPage{
@@ -143,11 +137,8 @@ type bboxWord struct {
 	Text string `xml:",chardata"`
 }
 
-// blocks converts a page's flow/block/line tree into MokuroBlocks, scaling
-// PDF-point coordinates to pixel coordinates (scaleX/scaleY = rendered
-// pixels per point). Each poppler "block" maps 1:1 to a MokuroBlock; a
-// block's lines become that block's Lines/LinesCoords, matching how mokuro
-// itself groups OCR'd text into blocks of lines.
+// Converts poppler's flow/block/line tree into MokuroBlocks, scaling PDF points
+// to pixels. Each poppler block maps 1:1 to a MokuroBlock, as mokuro groups too.
 func (p bboxPage) blocks(scaleX, scaleY float64) []MokuroBlock {
 	var out []MokuroBlock
 	for _, flow := range p.Flows {
@@ -173,11 +164,8 @@ func (p bboxPage) blocks(scaleX, scaleY float64) []MokuroBlock {
 				x2, y2 := line.XMax*scaleX, line.YMax*scaleY
 				mb.Lines[i] = text
 				mb.LinesCoords[i] = [][]float64{{x1, y1}, {x2, y2}}
-				// Vertical Japanese text renders as narrow-tall line boxes;
-				// horizontal (the common case for born-typeset/OCR'd PDFs)
-				// renders wide-short. No per-word script hint is available
-				// from pdftotext, so this aspect-ratio heuristic is the best
-				// available signal.
+				// Vertical text gives narrow-tall line boxes, horizontal wide-short.
+				// pdftotext offers no script hint, so aspect ratio is all there is.
 				if y2-y1 > x2-x1 {
 					mb.Vertical = true
 				}

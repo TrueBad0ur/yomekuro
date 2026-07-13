@@ -86,13 +86,8 @@ func (s *Server) putProgress(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// setReadState marks a volume read or unread from the library grid, where the
-// client has no manifest and so can't know which spine index "the end" is —
-// hence the spine length is resolved here.
-//
-// Marking read parks the reader at the last spine item, which is what makes the
-// state stick: reopening the book re-saves progress from wherever it lands, so
-// anything short of the end would immediately drop back below 100%.
+// Marks a volume read/unread. The spine length is resolved here (the grid has no
+// manifest); "read" parks at the last item, or reopening would undo it.
 func (s *Server) setReadState(w http.ResponseWriter, r *http.Request) {
 	id, ok := parseID(w, chi.URLParam(r, "id"))
 	if !ok {
@@ -130,9 +125,7 @@ func (s *Server) setReadState(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Carry the bookmark over: read state and a text bookmark are independent,
-	// and marking a volume read shouldn't silently drop where the reader had
-	// highlighted.
+	// Carry the bookmark over — read state and a text bookmark are independent.
 	prev, _, err := db.GetProgress(r.Context(), s.db, id, user.ID)
 	if err != nil && err != pgx.ErrNoRows {
 		respondError(w, http.StatusInternalServerError, err.Error())

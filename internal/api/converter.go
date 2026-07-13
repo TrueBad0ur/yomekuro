@@ -40,17 +40,14 @@ func isSupportedArchive(filename string) bool {
 	return matchedArchiveExt(filename) != ""
 }
 
-// isPDF reports whether filename is a standalone PDF upload — handled
-// separately from archives: no extraction, just staged as-is for
-// processPDFVolumes (converter/pdf.go) to route to OCR or direct text
-// extraction depending on whether it already has a text layer.
+// A standalone PDF upload: no extraction, staged as-is for processPDFVolumes to
+// route to OCR or direct text extraction.
 func isPDF(filename string) bool {
 	return strings.EqualFold(filepath.Ext(filename), ".pdf")
 }
 
-// sanitizeName rejects path separators and leading dots so the resulting
-// "<name>-in"/"<name>" folders can't escape the library or collide with the
-// hidden-file convention.
+// Rejects path separators and leading dots, so the "<name>-in"/"<name>" folders
+// can't escape the library or look hidden.
 func sanitizeName(name string) (string, error) {
 	name = strings.TrimSpace(name)
 	if name == "" {
@@ -92,13 +89,8 @@ func (s *Server) uploadArchive(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// "existing_series" switches this from "stage a new book" to "add one
-	// more volume/PDF to a book that's already in the library" — same
-	// pipeline either way (extract-or-stage, queue, convert), just landing
-	// in the existing output folder instead of a fresh one. See
-	// converter/convert.go's decideSeries/hasExistingEPUBs: a single new
-	// volume landing in a folder that already has other EPUBs in it
-	// automatically joins that folder's series, no extra flag needed there.
+	// "existing_series" switches this from staging a new book to adding a volume
+	// to one already in the library — same pipeline, just a different output dir.
 	existingSeries := strings.TrimSpace(r.FormValue("existing_series"))
 	addToExisting := existingSeries != ""
 
@@ -136,14 +128,8 @@ func (s *Server) uploadArchive(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Only new books need this: their staging folder is "<name>-in", so a second
-	// job under the same name would extract straight into the first one's files.
-	// Adds to an existing book each get their own randomized staging dir (below)
-	// and write differently-named EPUBs into the shared output folder, so several
-	// may legitimately be queued for the same book at once — which is exactly
-	// what uploading two volumes to it means. Enforcing the name here would
-	// instead reject the second file, and reject any add while the book's own
-	// original conversion was still running.
+	// New books share one "<name>-in" staging folder, so a same-named job would
+	// extract over it. Adds get their own dir, so several may queue for one book.
 	if !addToExisting {
 		taken, err := db.ConversionJobNameTaken(r.Context(), s.db, libID, name)
 		if err != nil {
@@ -156,13 +142,8 @@ func (s *Server) uploadArchive(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Staging dir lives inside lib.Path itself (not the system temp dir) so the
-	// final move into place is same-filesystem and atomic — /library is
-	// typically its own bind-mounted volume, and a cross-device rename would
-	// fail. For a new book this becomes inDir (the persistent "<name>-in"
-	// staging folder); for "add to existing" there's no meaningful fixed name
-	// for it (the target folder — outDir — already exists under "name"), so
-	// it just keeps its randomized temp name.
+	// Staged inside lib.Path, not /tmp, so the move into place is same-filesystem
+	// and atomic. Adds keep the randomized name; new books get renamed to inDir.
 	stagingPrefix := ".upload-staging-*"
 	if addToExisting {
 		stagingPrefix = name + "-add-*-in"
@@ -180,11 +161,8 @@ func (s *Server) uploadArchive(w http.ResponseWriter, r *http.Request) {
 	}()
 
 	if isPDF(header.Filename) {
-		// No extraction — staged as-is; processPDFVolumes (converter/pdf.go)
-		// decides OCR vs direct text extraction once the job runs. Named
-		// after the upload's own filename, not the job/series name — for
-		// "add to existing", `name` is the target book, not this one new
-		// volume's own title.
+		// Named after the upload's own filename: in add mode `name` is the target
+		// book, not this volume's title.
 		volName, err := sanitizeName(stripArchiveExt(header.Filename))
 		if err != nil {
 			respondError(w, http.StatusBadRequest, "invalid file name")
@@ -232,9 +210,8 @@ func (s *Server) uploadArchive(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if addToExisting {
-		// stagingDir's randomized name already is the final input path —
-		// outDir (the target book) already exists, there's no separate
-		// "<name>-in" to rename it to.
+		// The randomized staging dir is already the final input path: outDir exists
+		// and there's no "<name>-in" to rename to.
 		inDir = stagingDir
 		keepStaging = true
 	} else if err := os.Rename(stagingDir, inDir); err != nil {
@@ -300,20 +277,8 @@ func (s *Server) listConversionJobs(w http.ResponseWriter, r *http.Request) {
 	respond(w, map[string]any{"items": dtos})
 }
 
-// deleteConversionJob stops or removes a job depending on its current state:
-//
-//   - pending/done/failed/stopped: nothing is actively reading the staged
-//     files right now, so it's safe to delete the row and clean up
-//     immediately (see DeleteConversionJob's own doc comment for why only
-//     input_path, never output_path, gets removed).
-//   - running: a converter-worker goroutine has a mokuro subprocess actively
-//     reading from input_path *right now*. Deleting the row and calling
-//     os.RemoveAll on it here would race that subprocess — mid-batch volumes
-//     started disappearing out from under it, which is exactly the bug this
-//     replaces. Instead this only flags stop_requested; converter-worker
-//     polls that flag, cancels the subprocess cleanly, and does the actual
-//     row deletion + cleanup itself once the process has genuinely exited
-//     (converter/watch.go's processQueuedJob).
+// Stops or removes a job by state: a running one is only flagged (deleting its
+// files would race the live mokuro), anything terminal is deleted outright.
 func (s *Server) deleteConversionJob(w http.ResponseWriter, r *http.Request) {
 	id, ok := parseID(w, chi.URLParam(r, "id"))
 	if !ok {

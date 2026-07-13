@@ -17,10 +17,8 @@ import (
 	"github.com/ulikunitz/xz"
 )
 
-// Extract detects the archive format from archivePath's extension and extracts
-// its contents into destDir (created if needed), skipping OS junk and
-// rejecting zip-slip entries. A single top-level wrapping directory is
-// collapsed away afterward — see collapseSingleRoot.
+// Extracts archivePath into destDir by extension, skipping OS junk and rejecting
+// zip-slip. A single wrapping directory is collapsed away (collapseSingleRoot).
 func Extract(archivePath, destDir string) error {
 	if err := os.MkdirAll(destDir, 0o755); err != nil {
 		return fmt.Errorf("archive: mkdir dest: %w", err)
@@ -156,9 +154,8 @@ func extractTar(r io.Reader, destDir string) error {
 			if err := os.MkdirAll(filepath.Dir(destPath), 0o755); err != nil {
 				return err
 			}
-			// Mask to plain rwx bits: hdr.Mode is attacker-controlled and
-			// archive/tar's int64 could carry setuid/setgid/sticky bits or
-			// overflow on truncation to os.FileMode otherwise.
+			// Mask to plain rwx: hdr.Mode is attacker-controlled and could carry
+			// setuid/setgid/sticky bits, or overflow the cast.
 			mode := os.FileMode(hdr.Mode & 0o777)
 			if mode == 0 {
 				mode = 0o644
@@ -253,10 +250,8 @@ func extractRar(archivePath, destDir string) error {
 	}
 }
 
-// isJunk reports whether an archive entry is OS-generated cruft that should
-// never end up on disk: macOS AppleDouble resource forks ("._name"), Finder's
-// ".DS_Store", and anything under a top-level "__MACOSX/" directory (zip's
-// equivalent of AppleDouble storage).
+// OS-generated cruft that should never hit disk: "._name" resource forks,
+// ".DS_Store", and anything under "__MACOSX/".
 func isJunk(name string) bool {
 	name = filepath.ToSlash(name)
 	base := filepath.Base(name)
@@ -271,9 +266,8 @@ func isJunk(name string) bool {
 	return false
 }
 
-// safeJoin joins destDir with an archive-provided relative path, rejecting
-// anything that would escape destDir (zip-slip: "../" traversal or an
-// absolute path baked into the entry name).
+// Joins destDir with an archive-provided path, rejecting anything that escapes
+// it (zip-slip: "../" traversal, or an absolute path in the entry name).
 func safeJoin(destDir, name string) (string, error) {
 	clean := filepath.Clean(filepath.FromSlash(name))
 	if filepath.IsAbs(clean) || strings.HasPrefix(clean, ".."+string(filepath.Separator)) || clean == ".." {
@@ -282,10 +276,8 @@ func safeJoin(destDir, name string) (string, error) {
 	return filepath.Join(destDir, clean), nil
 }
 
-// collapseSingleRoot strips a redundant top-level wrapping directory (e.g.
-// `zip -r "Name.zip" "Name/"`) — left uncollapsed, the "one subfolder = one
-// volume" detection sees a single wrapper folder and merges all real volumes
-// into one. Loops in case an archive nests more than one such wrapper.
+// Strips a redundant wrapping directory (`zip -r "Name.zip" "Name/"`), which
+// would otherwise look like one volume and merge all the real ones into it.
 func collapseSingleRoot(dir string) error {
 	for {
 		entries, err := os.ReadDir(dir)
@@ -302,10 +294,8 @@ func collapseSingleRoot(dir string) error {
 			return fmt.Errorf("archive: collapse root: %w", err)
 		}
 
-		// Only collapse if the subdirectory itself holds further subdirectories
-		// (a multi-volume wrapper) or multiple top-level PDFs (each PDF is its
-		// own volume, same idea) — if it holds images directly, it's a
-		// legitimate single volume named after that folder.
+		// Only collapse a wrapper holding further subdirs or several PDFs. Holding
+		// images directly makes it a legitimate single volume named after itself.
 		hasSubdir, pdfCount := false, 0
 		for _, e := range innerEntries {
 			if e.IsDir() {

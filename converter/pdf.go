@@ -10,29 +10,16 @@ import (
 	"unicode"
 )
 
-// textPDFMinCharsPerPage is the average non-whitespace character count per
-// page above which a PDF is treated as having a real text layer rather than
-// being scanned page images with no extractable text at all.
+// Average non-whitespace chars per page above which a PDF counts as having a
+// real text layer rather than being scanned images.
 const textPDFMinCharsPerPage = 20
 
-// textPDFMinJapaneseFraction guards against a text layer that's present but
-// garbage — e.g. Internet Archive scans of Japanese books run through a
-// non-Japanese-aware OCR engine produce a dense layer of Latin-letter/symbol
-// noise (real characters, real per-page count, zero relation to the actual
-// page content). Real Japanese text layers are overwhelmingly kana/kanji;
-// this rejects anything below the threshold back to the OCR path.
+// Guards against a present-but-garbage text layer: scans run through a non-
+// Japanese-aware OCR carry dense Latin noise that passes a raw char count.
 const textPDFMinJapaneseFraction = 0.3
 
-// processPDFVolumes handles every top-level "<name>.pdf" in input as its own
-// volume, mirroring how a subfolder is one volume for images. Every PDF is
-// rasterized to page images first, same as a real scan — a PDF with a real
-// text layer then gets its EPUB built immediately from that text (positioned
-// at its real coordinates over the page images, no OCR involved) and its
-// volume folder is removed so mokuro never sees it; a scanned PDF (no text
-// layer) is left as a plain page-image folder for the normal mokuro pipeline
-// to OCR. Returns how many volumes it fully finished via the text path — the
-// caller's own ok count. series/seriesIndex, if series is non-empty,
-// override the volume's own name-derived series (see decideSeries).
+// Each top-level "<name>.pdf" is one volume, rasterized to page images. One with
+// a real text layer is built straight from that text; a scan is left to mokuro.
 func processPDFVolumes(input, output, series string, seriesIndex map[string]float64) (textOK int, err error) {
 	entries, err := os.ReadDir(input)
 	if err != nil {
@@ -88,10 +75,8 @@ func processPDFVolumes(input, output, series string, seriesIndex map[string]floa
 	return textOK, nil
 }
 
-// pdfHasTextLayer runs pdftotext and checks whether the extracted text is
-// substantial enough to be a real text layer (rather than empty/near-empty
-// scan artifacts) *and* is actually Japanese, not OCR noise from an engine
-// that doesn't understand the script.
+// Whether pdftotext yields enough text to be a real layer — and that it is
+// actually Japanese, not noise from an OCR engine blind to the script.
 func pdfHasTextLayer(pdfPath string) (bool, error) {
 	out, err := exec.Command("pdftotext", "-layout", pdfPath, "-").Output()
 	if err != nil {
@@ -120,9 +105,7 @@ func pdfHasTextLayer(pdfPath string) (bool, error) {
 	return float64(jaChars)/float64(chars) >= textPDFMinJapaneseFraction, nil
 }
 
-// isJapanese reports whether r falls in a script block used to write
-// Japanese: hiragana, katakana, CJK ideographs (kanji), or CJK/fullwidth
-// punctuation and forms.
+// Whether r is hiragana, katakana, kanji, or CJK/fullwidth punctuation.
 func isJapanese(r rune) bool {
 	switch {
 	case r >= 0x3040 && r <= 0x30FF: // Hiragana + Katakana

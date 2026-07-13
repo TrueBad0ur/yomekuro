@@ -12,14 +12,8 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// runWatch is a persistent worker with two independent poll loops — the
-// DB-backed upload queue and the manual-folder scan — so neither blocks the
-// other (a multi-hour manga OCR job used to stall every other upload behind
-// it). Each loop also dispatches its own jobs as they're found rather than
-// processing them one at a time in sequence: a fast text-PDF job (no OCR
-// needed, see pdf.go) finishes in seconds regardless of how many slow OCR
-// jobs are already running. The only thing still serialized is the GPU
-// itself, via gpuSem in convert.go.
+// Two independent poll loops — the upload queue and the manual-folder scan —
+// each dispatching jobs as goroutines. Only the GPU is serialized (gpuSem).
 func runWatch(pool *pgxpool.Pool, library string, interval time.Duration) {
 	slog.Info("watch mode started", "library", library, "poll_interval", interval)
 	ctx := context.Background()
@@ -43,11 +37,8 @@ func runWatch(pool *pgxpool.Pool, library string, interval time.Duration) {
 	}
 }
 
-// drainQueue claims every pending job and hands each to its own goroutine
-// immediately, rather than waiting for one to finish before claiming the
-// next — claiming is a fast atomic DB update either way, so this just
-// removes the "next job waits for the previous job's whole conversion"
-// bottleneck.
+// Claims every pending job straight into its own goroutine, so one conversion
+// never blocks the next from starting.
 func drainQueue(ctx context.Context, pool *pgxpool.Pool) {
 	for {
 		j, err := claimNextJob(ctx, pool)
@@ -62,20 +53,14 @@ func drainQueue(ctx context.Context, pool *pgxpool.Pool) {
 	}
 }
 
-// stopPollInterval controls how often a running job checks whether it's been
-// flagged for cancellation (see stopRequested) — same cadence as Convert's
-// own incremental-EPUB poll, no reason for it to be more eager than that.
+// How often a running job checks whether it's been flagged for cancellation.
 const stopPollInterval = 2 * time.Second
 
 func processQueuedJob(ctx context.Context, pool *pgxpool.Pool, j *job) {
 	slog.Info("watch: converting", "job", j.Name, "input", j.InputPath, "output", j.OutputPath)
 
-	// Cancelling jobCtx kills the mokuro subprocess (see Convert/runMokuro) —
-	// this goroutine is the only thing that ever cancels it, by polling
-	// stop_requested (set by the UI's "Stop" button, internal/api/converter.go)
-	// while the conversion is running. The deferred cancel() below also
-	// guarantees this goroutine exits promptly once Convert returns on its
-	// own, canceled or not.
+	// Cancelling jobCtx kills mokuro. This poller is the only thing that does so,
+	// watching stop_requested; the deferred cancel also stops it on normal exit.
 	jobCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	go func() {
@@ -109,9 +94,8 @@ func processQueuedJob(ctx context.Context, pool *pgxpool.Pool, j *job) {
 
 	switch {
 	case jobCtx.Err() != nil:
-		// Cancelled via the stop-poller above, not a parent-context timeout
-		// (ctx here is always context.Background() — see runWatch) — a
-		// deliberate user action, not a failure.
+		// Cancelled by the stop-poller above: a deliberate user action, not a
+		// failure (the parent ctx is always Background).
 		slog.Info("watch: conversion stopped", "job", j.Name, "volumes_done", ok)
 		markJobStopped(ctx, pool, j.ID)
 		if ok == 0 {
@@ -127,11 +111,8 @@ func processQueuedJob(ctx context.Context, pool *pgxpool.Pool, j *job) {
 		}
 		slog.Error("watch: conversion unsuccessful", "job", j.Name, "detail", msg)
 		markJobFailed(ctx, pool, j.ID, msg)
-		// ok > 0 here means some volumes (e.g. text-layer PDFs, which never
-		// touch mokuro) already finished successfully before the error/failure
-		// — a text-PDF volume can succeed independently of an OCR volume
-		// failing in the same job. Only wipe the staging folders when
-		// *nothing* succeeded, otherwise this would delete real output.
+		// ok > 0 means some volumes already converted, so only wipe the staging
+		// folders when nothing at all succeeded — else this deletes real output.
 		if ok == 0 {
 			cleanupFailedJob(j.Name, j.InputPath, j.OutputPath)
 		}
@@ -141,9 +122,8 @@ func processQueuedJob(ctx context.Context, pool *pgxpool.Pool, j *job) {
 	}
 }
 
-// cleanupFailedJob removes a completely-failed upload's staging folders so
-// the same name can be retried — only called when nothing at all converted,
-// so the output dir is guaranteed empty.
+// Removes a wholly-failed upload's staging folders so the name can be retried.
+// Only called when nothing converted, so the output dir is empty.
 func cleanupFailedJob(name, inputPath, outputPath string) {
 	if err := os.RemoveAll(inputPath); err != nil {
 		slog.Warn("watch: cleanup failed job input", "job", name, "path", inputPath, "err", err)
@@ -153,21 +133,15 @@ func cleanupFailedJob(name, inputPath, outputPath string) {
 	}
 }
 
-// manualInProgress tracks input dirs currently being converted by a
-// goroutine spawned from scanManualFoldersIn. A manual folder has no DB row
-// to atomically claim (unlike the upload queue), so without this a folder
-// mid-conversion would look identical to one that just hasn't started yet
-// (manualFolderNeedsConversion can't tell "in progress" from "not started")
-// and get relaunched on every subsequent poll tick.
+// Manual folders have no DB row to claim, so without this a folder mid-
+// conversion looks unstarted and gets relaunched on every poll tick.
 var (
 	manualInProgressMu sync.Mutex
 	manualInProgress   = map[string]bool{}
 )
 
-// scanManualFolders looks for "<name>-in" folders one level below library —
-// library itself is just the mount point (/library); the actual registered
-// libraries are its subfolders (ranobe/manga/html, see cmd/yomekuro/main.go),
-// and that's where a manually staged "-in" folder actually lives.
+// Looks for "<name>-in" folders one level below library: /library is only the
+// mount point, the registered libraries are its subfolders.
 func scanManualFolders(ctx context.Context, pool *pgxpool.Pool, library string) {
 	roots, err := os.ReadDir(library)
 	if err != nil {
@@ -232,10 +206,8 @@ func scanManualFoldersIn(ctx context.Context, pool *pgxpool.Pool, libraryRoot st
 	}
 }
 
-// manualFolderNeedsConversion reports whether outputDir is missing EPUBs for
-// one or more of inputDir's volumes. A manual folder has no job-status marker
-// to check instead, so without this every already-converted manual folder
-// left in the library would get fully rebuilt on every single poll tick.
+// Whether outputDir is missing EPUBs for any of inputDir's volumes — a manual
+// folder has no job status, so without this it would rebuild on every tick.
 func manualFolderNeedsConversion(inputDir, outputDir string) bool {
 	volumes, err := countVolumes(inputDir)
 	if err != nil || volumes == 0 {
@@ -245,10 +217,8 @@ func manualFolderNeedsConversion(inputDir, outputDir string) bool {
 	return len(epubs) < volumes
 }
 
-// countVolumes mirrors isFlatVolume's detection in convert.go, plus
-// processPDFVolumes': a folder of images directly is one volume, a folder of
-// subdirectories is one volume per subdirectory (ignoring mokuro's own
-// "_ocr" cache dir), and each top-level ".pdf" file is its own volume too.
+// Images directly in the folder are one volume; each subdirectory (bar "_ocr")
+// and each top-level ".pdf" is one more.
 func countVolumes(dir string) (int, error) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {

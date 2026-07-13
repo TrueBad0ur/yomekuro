@@ -22,16 +22,12 @@ type imgEntry struct {
 	mediaType string
 }
 
-// Matches either "... v02"/"... Vol 3"/"... 4" (whitespace + optional word +
-// digits at the end) or a Japanese-style "...（05）" parenthesized volume
-// number — matched against the halfwidth-normalized name (see
-// toHalfwidthVolume), since real-world tankobon filenames use fullwidth
-// digits and fullwidth parens (１２３, （ ）), not ASCII ones.
+// Trailing "v02"/"Vol 3"/"4", or a Japanese "（05）" — matched halfwidth-
+// normalized, since real tankobon filenames use fullwidth digits and parens.
 var reVolSuffix = regexp.MustCompile(`(?i)(\s+(v\.?\s*|vol\.?\s*|volume\s*)?\d+|\(\s*\d+\s*\))\s*$`)
 
-// seriesName strips trailing volume number from a volume name.
-// "Dungeon Meshi v01" → "Dungeon Meshi", "SAO Vol 3" → "SAO",
-// "葬送のフリーレン（０５）" → "葬送のフリーレン"
+// Strips a trailing volume number: "Dungeon Meshi v01" → "Dungeon Meshi",
+// "葬送のフリーレン（０５）" → "葬送のフリーレン".
 func seriesName(volumeName string) string {
 	s := reVolSuffix.ReplaceAllString(strings.TrimSpace(toHalfwidthVolume(volumeName)), "")
 	s = strings.TrimSpace(s)
@@ -57,11 +53,8 @@ func volumeIndex(name string) float64 {
 
 var reLeadingNum = regexp.MustCompile(`^\s*0*(\d+)`)
 
-// leadingVolumeIndex extracts a leading number from name, e.g.
-// "1 Kage no koibito" → 1. Unlike volumeIndex (trailing "vNN"/"（NN）"
-// patterns, for series where each volume's own name embeds the series
-// title), this handles anthology-style naming where the number comes first
-// and the rest of the name is an unrelated per-item title.
+// A leading number: "1 Kage no koibito" → 1. For anthologies, where the number
+// comes first and the rest of the name is an unrelated per-item title.
 func leadingVolumeIndex(name string) (float64, bool) {
 	m := reLeadingNum.FindStringSubmatch(toHalfwidthVolume(name))
 	if m == nil {
@@ -74,9 +67,7 @@ func leadingVolumeIndex(name string) (float64, bool) {
 	return float64(n), true
 }
 
-// toHalfwidthVolume maps fullwidth digits (U+FF10-U+FF19) and fullwidth
-// parens (U+FF08/09) to their ASCII equivalents, leaving everything else
-// untouched.
+// Maps fullwidth digits and parens to ASCII, leaving everything else alone.
 func toHalfwidthVolume(s string) string {
 	return strings.Map(func(r rune) rune {
 		switch {
@@ -301,10 +292,8 @@ func pageXHTML(num int, page MokuroPage, imgHref string, ocr bool) string {
 	return b.String()
 }
 
-// advanceEm approximates a string's rendered advance in em units (its width at
-// font-size 1): fullwidth glyphs advance ~1em, halfwidth/ASCII ~0.55em. Used
-// instead of a raw rune count so punctuation and halfwidth/Latin don't skew the
-// derived font size on a mixed-script line.
+// advanceEm is a string's width at font-size 1: fullwidth glyphs ~1em,
+// halfwidth/ASCII ~0.55em. A raw rune count would skew mixed-script lines.
 func advanceEm(text string) float64 {
 	var adv float64
 	for _, r := range text {
@@ -317,47 +306,55 @@ func advanceEm(text string) float64 {
 	return adv
 }
 
-// Offsets between a mokuro line quad and the ink actually printed inside it,
-// measured over 300+ vertical lines / 16 pages (rendered-text box vs image ink,
-// using the slant-aware geometry below): comic-text-detector pads the
-// reading-START of a quad by ~0.21 glyph and its reading-END by ~0.05, and the
-// ink sits ~0.05 glyph to the right of the column's centre line.
-//
-// Anchoring text at the quad's top-left (the plain placement below) instead
-// lands every column ~12px left of and ~10px above the real characters. These
-// constants put it back on the glyphs. They describe the OCR detector's
-// geometry, so they apply only to OCR volumes — pdftotext quads
-// (buildTextVolume) are already tight to the text.
-// The pads differ per orientation, so both were calibrated the same way against
-// real pages: vertical over 300+ columns, horizontal over 380+ rows. The
-// horizontal quad in particular runs ~1.7x taller than its glyphs, so anchoring
-// the row at the quad's top edge (as the plain placement does) floats every line
-// ~0.35 glyph above the print.
+// Where the ink sits inside a mokuro quad, measured against real pages (300+
+// lines per orientation). OCR volumes only — pdftotext quads are already tight.
 const (
-	ocrVertStartPad, ocrVertEndPad, ocrVertCrossNudge = 0.21, 0.05, 0.05
-	ocrHorStartPad, ocrHorEndPad, ocrHorCrossNudge    = 0.09, 0.05, 0.00
+	ocrVertStartPad, ocrVertCrossNudge = 0.21, 0.05
+	ocrHorStartPad, ocrHorCrossNudge   = 0.09, 0.00
 
 	// A line whose own fitted size exceeds its block's median by more than this
 	// is trusted no further than the median — see blockRefFontSize.
 	ocrFontOutlier = 1.15
 )
 
-func ocrPads(vertical bool) (start, end, nudge float64) {
-	if vertical {
-		return ocrVertStartPad, ocrVertEndPad, ocrVertCrossNudge
+// Em cells a quad spans beyond the text's advance (so, negative): a quad wraps
+// ink, and punctuation inks only part of its cell (。 a third, 「 a half).
+func ocrSpanSlack(text string, vertical bool) float64 {
+	r := []rune(text)
+	if len(r) == 0 {
+		return 0
 	}
-	return ocrHorStartPad, ocrHorEndPad, ocrHorCrossNudge
+	tail := strings.ContainsRune("。、．，」』）】〉》！？", r[len(r)-1])
+	head := strings.ContainsRune("「『（【〈《", r[0])
+	switch {
+	case vertical && head && tail:
+		return -1.15
+	case vertical && head:
+		return -0.94
+	case vertical && tail:
+		return -0.55
+	case vertical:
+		return +0.10
+	case head && tail:
+		return -0.72
+	case head:
+		return -0.73
+	case tail:
+		return -0.60
+	default:
+		return -0.28
+	}
 }
 
-// lineGeometry resolves an OCR line quad into the centre line of its text:
-// where the glyphs start, how far they run, the fitted glyph size, and how far
-// the line leans.
-//
-// Detector quads are often parallelograms, and a tilted one's axis-aligned bbox
-// both over-states its size and hides the lean — so the reading axis is taken
-// from the midpoints of the quad's two leading/trailing short edges instead.
-// For a vertical line those are the top and bottom edges; for a horizontal one,
-// the left and right.
+func ocrPads(vertical bool) (start, nudge float64) {
+	if vertical {
+		return ocrVertStartPad, ocrVertCrossNudge
+	}
+	return ocrHorStartPad, ocrHorCrossNudge
+}
+
+// Resolves a quad into its text's centre line: start, size and lean. Quads are
+// often parallelograms, so the axis comes from the two short edges' midpoints.
 func lineGeometry(coords [][]float64, text string, vertical bool) (startX, startY, fs, deg float64, ok bool) {
 	if len(coords) != 4 {
 		return 0, 0, 0, 0, false
@@ -378,8 +375,8 @@ func lineGeometry(coords [][]float64, text string, vertical bool) (startX, start
 	if main <= 0 {
 		return 0, 0, 0, 0, false
 	}
-	startPad, endPad, _ := ocrPads(vertical)
-	fs = main / (adv + startPad + endPad)
+	startPad, _ := ocrPads(vertical)
+	fs = main / (adv + ocrSpanSlack(strings.TrimSpace(text), vertical))
 	if fs <= 0 {
 		return 0, 0, 0, 0, false
 	}
@@ -387,9 +384,7 @@ func lineGeometry(coords [][]float64, text string, vertical bool) (startX, start
 	startX = ax + startPad*fs*(bx-ax)/main
 	startY = ay + startPad*fs*(by-ay)/main
 
-	// Clockwise rotation that makes the div lean the way the quad does. For a
-	// vertical column that's the sideways drift of its foot; for a horizontal
-	// row, the drop of its far end.
+	// Clockwise lean matching the quad: a column's sideways drift, a row's drop.
 	var sin float64
 	if vertical {
 		sin = (ax - bx) / main
@@ -400,16 +395,8 @@ func lineGeometry(coords [][]float64, text string, vertical bool) (startX, start
 	return startX, startY, fs, deg, true
 }
 
-// blockRefFontSize is the median fitted size of a block's lines, or 0 when
-// there are too few to be meaningful.
-//
-// Print sets a whole block at one size, so the median is the block's true glyph
-// size. A line's own fitted size divides its extent by the number of characters
-// the OCR *read* — so when the OCR drops characters (one real case: it read a
-// parenthesised year as 3 characters fewer than printed) the size comes out
-// far too big and the line is stretched right off the glyphs. Capping such
-// outliers at the block's median keeps their glyphs on the print; the line then
-// simply ends short instead of skewing along its whole length.
+// Median fitted size of a block's lines (print uses one size per block), or 0 if
+// too few. Caps lines whose OCR miscounted characters and so came out oversized.
 func blockRefFontSize(blk MokuroBlock, ocr bool) float64 {
 	if !ocr {
 		return 0
@@ -431,11 +418,8 @@ func blockRefFontSize(blk MokuroBlock, ocr bool) float64 {
 	return sizes[len(sizes)/2]
 }
 
-// writeLineDiv renders one OCR line as a transparent, positioned <div>.
-// white-space:nowrap keeps it a single column/row. The whole line stays one
-// <div> with one text run — pop-up dictionaries (Yomitan/10ten) walk the DOM to
-// assemble multi-character words, so the line must never be split into per-glyph
-// elements.
+// One OCR line as a transparent positioned <div>. It must stay a single <div>
+// with one text run: pop-up dictionaries walk the DOM to assemble words.
 func writeLineDiv(b *strings.Builder, text string, coords [][]float64, vertical, ocr bool, blockRef float64) {
 	text = strings.TrimSpace(text)
 	n := utf8.RuneCountInString(text)
@@ -463,12 +447,9 @@ func writeLineDiv(b *strings.Builder, text string, coords [][]float64, vertical,
 		if blockRef > 0 && fs > ocrFontOutlier*blockRef {
 			fs = blockRef
 		}
-		_, _, nudge := ocrPads(vertical)
-		// The quad is wider/taller than the glyphs it holds, and the ink sits
-		// near the middle of that slack — so the line is centred across its own
-		// axis rather than pinned to the quad's edge, then nudged onto the ink.
-		// It stays a single <div> with one text run: pop-up dictionaries walk the
-		// DOM to assemble multi-character words, so a line must never be split.
+		_, nudge := ocrPads(vertical)
+		// The quad has slack around its glyphs and the ink sits mid-slack, so the
+		// line is centred across its axis rather than pinned to the quad's edge.
 		var style string
 		if vertical {
 			style = fmt.Sprintf(
@@ -485,9 +466,8 @@ func writeLineDiv(b *strings.Builder, text string, coords [][]float64, vertical,
 		return
 	}
 
-	// Plain placement: anchor at the quad's top-left, size = axis length / char
-	// count. Used for horizontal lines and for pdftotext text-layer quads, which
-	// are already tight to the glyphs so the OCR offsets above don't apply.
+	// Plain placement for pdftotext text-layer quads, which are already tight to
+	// the glyphs, so the OCR offsets above don't apply.
 	var fs float64
 	if vertical {
 		fs = lh / float64(n)

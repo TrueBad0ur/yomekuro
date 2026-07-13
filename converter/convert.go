@@ -12,28 +12,15 @@ import (
 	"time"
 )
 
-// mokuroPollInterval controls how often Convert checks mokuroDir for newly
-// finished ".mokuro" files while a multi-volume mokuro run is still in
-// progress, so each volume's EPUB gets built as soon as it's ready instead
-// of only after every volume in the batch finishes OCR (which, for a large
-// batch, could mean nothing shows up in the library for an hour or more).
+// How often Convert looks for newly finished ".mokuro" files, so each volume's
+// EPUB appears as it lands rather than only once the whole batch is OCR'd.
 const mokuroPollInterval = 2 * time.Second
 
-// gpuSem serializes every mokuro invocation across all callers (the DB-backed
-// upload queue and the manual-folder scan now both run their own jobs
-// concurrently — see watch.go — but there's still only one GPU). Work that
-// never touches mokuro (JXL conversion, text-layer PDF extraction) doesn't
-// need this and runs fully in parallel.
-//
-// It's a 1-slot channel rather than a sync.Mutex because waiting for the GPU
-// has to be abandonable: a job stopped from the UI while queued behind another
-// job's multi-hour OCR run would otherwise block in Lock() until that run
-// finished, sitting there as "running"/"Stopping…" for the whole wait instead
-// of stopping. A channel can be selected against the job's context.
+// gpuSem serializes mokuro across all callers — jobs run concurrently but there
+// is one GPU. A channel, not a Mutex: the wait must be abandonable on Stop.
 var gpuSem = make(chan struct{}, 1)
 
-// acquireGPU takes the GPU slot, or gives up if ctx is cancelled first (the job
-// was stopped while queued).
+// acquireGPU takes the GPU slot, or gives up if the job is stopped while queued.
 func acquireGPU(ctx context.Context) error {
 	select {
 	case gpuSem <- struct{}{}:
@@ -45,22 +32,15 @@ func acquireGPU(ctx context.Context) error {
 
 func releaseGPU() { <-gpuSem }
 
-// Convert runs mokuro OCR over input (a folder of volume subdirectories, or a
-// single flat folder of images treated as one volume) and writes one EPUB per
-// volume into output. onVolume, if non-nil, is called with each volume's name
-// as mokuro starts OCR'ing it. Cancelling ctx kills a running mokuro
-// subprocess (used to implement "Stop" on a queued job — see watch.go);
-// volumes already built before cancellation are kept, matching how a
-// genuine mid-batch failure is handled.
+// Convert OCRs input (volume subdirs, or one flat image folder) into one EPUB
+// per volume. Cancelling ctx kills mokuro; volumes already built are kept.
 func Convert(ctx context.Context, input, output, volume string, noCache bool, onVolume func(string)) (ok, fail int, err error) {
 	if err := os.MkdirAll(output, 0755); err != nil {
 		return 0, 0, fmt.Errorf("create output dir: %w", err)
 	}
 
-	// Decided once, upfront, from the untouched input listing — later steps
-	// (JXL conversion, PDF rasterization) restructure the directory, and
-	// deciding this incrementally as volumes finish would mean the answer
-	// could change partway through a batch.
+	// Decided upfront: later steps restructure the directory, so deciding this
+	// incrementally could change the answer partway through a batch.
 	var series string
 	var seriesIndex map[string]float64
 	if volume == "" {
@@ -81,9 +61,8 @@ func Convert(ctx context.Context, input, output, volume string, noCache bool, on
 	}
 	ok += pdfTextOK
 
-	// A folder of nothing but text-layer PDFs is fully handled above with no
-	// image volumes left for mokuro — skip straight to done instead of
-	// erroring out on an empty input dir.
+	// Nothing but text-layer PDFs: already fully handled, so don't error on the
+	// now-empty input dir.
 	empty, err := isEmptyDir(input)
 	if err != nil {
 		return ok, 0, fmt.Errorf("read input dir: %w", err)
@@ -92,9 +71,8 @@ func Convert(ctx context.Context, input, output, volume string, noCache bool, on
 		return ok, 0, nil
 	}
 
-	// mokuroDir is what --parent_dir points at; volumesBaseDir holds the actual
-	// page images. Normally both are input — differ only for the flat-volume
-	// symlink case below.
+	// mokuroDir is --parent_dir; volumesBaseDir holds the page images. They only
+	// differ for the flat-volume symlink case below.
 	mokuroDir := input
 	volumesBaseDir := input
 
@@ -133,12 +111,8 @@ func Convert(ctx context.Context, input, output, volume string, noCache bool, on
 		}
 	}
 
-	// mokuro writes each volume's ".mokuro" file as soon as that volume's OCR
-	// finishes, well before the whole batch's process exits — so instead of
-	// waiting for runMokuro to return before building any EPUBs (which, for a
-	// large batch, could mean nothing appears in the library for an hour or
-	// more), poll for newly-written files while it's still running and build
-	// each one's EPUB immediately.
+	// mokuro writes each ".mokuro" as that volume finishes, long before the batch
+	// exits — so poll and build each EPUB immediately instead of waiting.
 	if err := acquireGPU(ctx); err != nil {
 		return ok, fail, err
 	}
@@ -147,9 +121,8 @@ func Convert(ctx context.Context, input, output, volume string, noCache bool, on
 	mokuroErrCh := make(chan error, 1)
 	go func() { mokuroErrCh <- runMokuro(ctx, mokuroDir, volumeDirs, noCache, onVolume) }()
 
-	// Forcing a single volume's re-run leaves every other volume's ".mokuro"
-	// file sitting untouched in the same dir from earlier runs — pre-mark
-	// them "built" so the poll loop only ever picks up the targeted one.
+	// Re-running one volume leaves the others' ".mokuro" files in place; pre-mark
+	// them built so the poll loop only picks up the targeted one.
 	built := map[string]bool{}
 	if volume != "" {
 		if entries, err := os.ReadDir(mokuroDir); err == nil {
@@ -188,12 +161,8 @@ pollLoop:
 	return ok, fail, nil
 }
 
-// buildEPUBsForNewMokuroFiles scans mokuroDir for ".mokuro" files not yet in
-// built, builds each one's EPUB, and marks it built regardless of success —
-// a parse/build failure isn't retried on the next poll tick, matching the
-// original one-pass-at-the-end behavior's error handling. series/seriesIndex,
-// if series is non-empty, override the volume's own name-derived series (see
-// decideSeries).
+// Builds an EPUB for each ".mokuro" not yet in built, marking it built either
+// way (a failure isn't retried). Non-empty series overrides the derived one.
 func buildEPUBsForNewMokuroFiles(mokuroDir, volumesBaseDir, output string, built map[string]bool, series string, seriesIndex map[string]float64) (ok, fail int) {
 	entries, err := os.ReadDir(mokuroDir)
 	if err != nil {
@@ -207,9 +176,8 @@ func buildEPUBsForNewMokuroFiles(mokuroDir, volumesBaseDir, output string, built
 
 		vol, err := parseMokuroFile(mokuroPath)
 		if err != nil {
-			// mokuro writes the file then fills it in — a parse failure here
-			// may just mean it's mid-write, so don't mark it built yet and
-			// retry on the next tick instead of counting it as failed.
+			// mokuro writes the file then fills it in, so a parse failure may just
+			// mean mid-write: retry next tick rather than counting it failed.
 			continue
 		}
 		built[e.Name()] = true
@@ -229,12 +197,8 @@ func buildEPUBsForNewMokuroFiles(mokuroDir, volumesBaseDir, output string, built
 	return ok, fail
 }
 
-// candidateVolumeNames lists the volume names input's contents will produce
-// before anything is processed: top-level subdirectories (excluding mokuro's
-// own "_ocr" cache) and top-level ".pdf" files, by name without extension.
-// Loose image files at the top level (the flat-single-volume case) produce
-// no candidates here — decideSeries's caller falls back to the output name
-// for that case, same as the existing flat-volume naming already does.
+// The volume names input will produce: top-level subdirs and ".pdf" files. A
+// flat image folder yields none — callers fall back to the output name.
 func candidateVolumeNames(input string) ([]string, error) {
 	entries, err := os.ReadDir(input)
 	if err != nil {
@@ -254,18 +218,8 @@ func candidateVolumeNames(input string) ([]string, error) {
 	return names, nil
 }
 
-// decideSeries looks at every volume name a job's input will produce and
-// decides how to group them into one series. If they share a common
-// "Name vNN"/"Name（NN）"-style naming pattern, each volume keeps its own
-// name-derived series (seriesName/volumeIndex) — this preserves the common
-// case where names already encode the real series ("Dungeon Meshi v01",
-// "Dungeon Meshi v02"), so the returned series is "" and seriesIndex is nil,
-// telling callers to fall back to per-volume derivation as before. Otherwise
-// (no shared pattern — e.g. an anthology upload of differently-titled
-// PDFs/subfolders, "1 Kage no koibito", "2 Kowai hanashi", ...) there's no
-// per-volume series signal at all, so every volume in the batch is grouped
-// under the job's own output name instead, indexed by whatever leading
-// number is in its name (or its sorted position if it has none).
+// Groups a job's volumes into a series: names sharing a "Name vNN" pattern keep
+// their own (returns ""); an anthology is grouped under the job's output name.
 func decideSeries(names []string, output string) (series string, seriesIndex map[string]float64) {
 	if len(names) == 0 {
 		// Flat single volume — matches the naming already used for it
@@ -283,11 +237,8 @@ func decideSeries(names []string, output string) (series string, seriesIndex map
 			break
 		}
 	}
-	// A single new volume landing in an output folder that already holds
-	// other EPUBs — e.g. adding one more volume to an existing book via the
-	// "add to existing" upload flow — belongs to that established series
-	// regardless of what its own filename looks like; there's nothing to
-	// "agree" with, it's already a fact on disk.
+	// One new volume landing in a folder that already holds EPUBs joins that
+	// series whatever its filename says — it's already a fact on disk.
 	if agree && len(sorted) == 1 && hasExistingEPUBs(output) {
 		agree = false
 	}
@@ -313,9 +264,8 @@ func hasExistingEPUBs(output string) bool {
 	return len(matches) > 0
 }
 
-// isFlatVolume reports whether dir holds page images directly (a single volume)
-// rather than one subdirectory per volume. "_ocr" (mokuro's own cache dir) is
-// ignored so a previously-converted flat volume still detects as flat.
+// Whether dir holds page images directly (one volume) rather than a subdir per
+// volume. "_ocr" is ignored so an already-converted flat volume still counts.
 func isFlatVolume(dir string) (bool, error) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
@@ -337,9 +287,8 @@ func isFlatVolume(dir string) (bool, error) {
 	return hasImage, nil
 }
 
-// isEmptyDir reports whether dir has nothing left for mokuro to process —
-// used after processPDFVolumes to detect an input made entirely of
-// text-layer PDFs, which are already fully handled by that point.
+// Whether mokuro has nothing left to process — i.e. the input was all
+// text-layer PDFs, already handled by processPDFVolumes.
 func isEmptyDir(dir string) (bool, error) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
@@ -354,10 +303,8 @@ func isEmptyDir(dir string) (bool, error) {
 	return true, nil
 }
 
-// convertJXLPages decodes .jxl page images to .png via djxl (libjxl-tools) and
-// removes the originals — mokuro's page scanner only recognizes
-// jpg/jpeg/png/webp. PNG rather than JPEG output avoids djxl's "lossless JPEG
-// reconstruction" path, which fails on some real-world JXLs.
+// Decodes .jxl pages to .png via djxl — mokuro only reads jpg/png/webp. PNG, not
+// JPEG: djxl's lossless-JPEG-reconstruction path fails on some real JXLs.
 func convertJXLPages(dir string) error {
 	return filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
 		if err != nil || d.IsDir() || strings.ToLower(filepath.Ext(path)) != ".jxl" {

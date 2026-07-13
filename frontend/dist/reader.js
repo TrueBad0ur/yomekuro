@@ -132,11 +132,8 @@ function applyBookmarkMark() {
   }
 }
 
-// Wraps only the text-node fragments that fall inside `range` in individual
-// <mark> elements, one per text node. Never moves element nodes — critical
-// for markup like <ruby><rt>…</rt></ruby>, where relocating a node out of
-// its parent (as a naive range.extractContents()+insertNode() would) breaks
-// the ruby/rt pairing and reflows the furigana layout.
+// Wraps each text-node fragment inside `range` in its own <mark>. Never moves
+// element nodes: that would rip <rt> out of <ruby> and break the furigana.
 function markTextNodesInRange(range, root) {
   const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
     acceptNode: node => range.intersectsNode(node) ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_REJECT,
@@ -408,10 +405,8 @@ function applyEpubStyles(doc, chapterBase) {
   });
 }
 
-// HTML-library books bring unscoped CSS that can clash with the chrome bars,
-// so we drop the bars' background/border entirely and pin their text/button
-// colors to the light palette (.html-reader-chrome in style.css), since the
-// source content is never theme-aware.
+// HTML books bring unscoped CSS that clashes with the chrome bars, so drop the
+// bars' background and pin them to the light palette — the source isn't themed.
 function matchChromeToContent() {
   document.body.classList.add('html-reader-chrome');
   document.querySelectorAll('.reader-nav, .reader-bottom-nav').forEach(el => {
@@ -587,10 +582,8 @@ function getProgression() {
 function saveProgress() {
   if (!manifest) return;
   const progression = getProgression();
-  // Fixed-layout has no intra-page progression, so a page is either read or it
-  // isn't: sitting on page N means N of them are done. Counting it as
-  // (N-1)+0 instead would cap a fully-read manga at (len-1)/len — 99% — and
-  // would also knock a volume marked read straight back down on reopening.
+  // Fixed-layout has no intra-page progression: on page N, N pages are read.
+  // Counting (N-1)+0 would cap a finished manga at 99% and undo "mark as read".
   const percentage = isFixedLayout
     ? (spineIndex + 1) / manifest.spine.length
     : (spineIndex + progression) / manifest.spine.length;

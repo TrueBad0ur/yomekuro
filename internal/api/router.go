@@ -68,9 +68,8 @@ func NewRouter(pool *pgxpool.Pool, sc *scanner.Scanner, w *scanner.Watcher, data
 		r.Put("/api/books/{id}/progress", s.putProgress)
 		r.Put("/api/books/{id}/read", s.setReadState)
 
-		// Admin-only — library/user management, manga upload, and genre tagging
-		// are all settings-page features; regular users get read-only access
-		// to everything above (browse, read, track progress).
+		// Admin-only: settings-page features. Regular users get read-only access to
+		// everything above (browse, read, track progress).
 		r.Group(func(r chi.Router) {
 			r.Use(s.adminRequired)
 
@@ -113,9 +112,7 @@ func NewRouter(pool *pgxpool.Pool, sc *scanner.Scanner, w *scanner.Watcher, data
 	return r
 }
 
-// getConfig exposes server-side-configurable values the frontend needs but
-// can't read from the container's own environment (it's static JS shipped to
-// the browser, not a process inside the container).
+// Server-side config the frontend needs but can't read from container env.
 func (s *Server) getConfig(w http.ResponseWriter, r *http.Request) {
 	respond(w, map[string]any{"jobs_poll_interval_ms": s.jobsPollIntervalMS})
 }

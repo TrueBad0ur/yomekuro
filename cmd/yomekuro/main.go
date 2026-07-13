@@ -85,9 +85,8 @@ func main() {
 
 	router := api.NewRouter(pool, sc, watcher, cfg.Data, cfg.ZipCacheSize, cfg.JobsPollIntervalMS)
 
-	// WriteTimeout is deliberately unset — it'd cut off legitimate large
-	// EPUB/manga downloads to slow clients. ReadHeaderTimeout still guards
-	// against slow-header (Slowloris-style) connections.
+	// WriteTimeout is deliberately unset: it would cut off large downloads to slow
+	// clients. ReadHeaderTimeout still guards against Slowloris.
 	srv := &http.Server{
 		Addr:              cfg.Addr,
 		Handler:           router,

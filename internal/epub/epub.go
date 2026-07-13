@@ -51,9 +51,8 @@ type SpineItem struct {
 	MediaType string
 }
 
-// Open parses an EPUB at filePath and returns a fully populated Book.
-// libraryPath is used for the series-name fallback (parent directory heuristic);
-// pass "" to skip it.
+// Parses an EPUB into a Book. libraryPath drives the series-name fallback
+// (parent-directory heuristic); pass "" to skip it.
 func Open(filePath, libraryPath string) (*Book, error) {
 	fi, err := os.Stat(filePath)
 	if err != nil {

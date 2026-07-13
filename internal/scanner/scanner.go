@@ -80,9 +80,8 @@ func (s *Scanner) processFile(ctx context.Context, lib db.Library, filePath stri
 		return false, err
 	}
 
-	// Truncate to microseconds: both ext4 and APFS store nanosecond mtimes,
-	// but PostgreSQL timestamptz has microsecond precision. Without truncation
-	// the round-trip comparison would always fail after the first write.
+	// Truncate to microseconds: filesystems store nanoseconds but timestamptz
+	// doesn't, so the round-trip comparison would never match.
 	mtime := fi.ModTime().UTC().Truncate(time.Microsecond)
 
 	// Cheap check: mtime + size match → no change.

@@ -60,8 +60,12 @@ works standalone if you only want the converter without yomekuro.
 
 The home page lists your series as cover-art tiles, grouped by library
 (Ranobe / Manga / HTML / PDF) in the sidebar. Click a series to see its books,
-click a book to start reading. Search and genre/tag filters are in the
-header; admins get an extra button on each book to edit its tags.
+click a book to start reading. Search and genre/tag filters are in the header.
+
+Each book has a **⋯** menu (top-right of its cover) to **mark the volume read or
+unread** — handy when you finish a book somewhere other than its last page.
+Finished volumes show "Read" instead of a percentage; the bar tracks reading
+progress otherwise. Admins get an extra "Edit genres" entry in the same menu.
 
 ![Library page](docs/screenshots/library.png)
 
@@ -93,10 +97,16 @@ uploading manga for OCR conversion.
 
 ### Uploading manga for OCR (admin only)
 
-Settings → Upload manga: pick a library, drop an archive of raw page images
-or a PDF onto the upload area, and a name. The job is queued and its
-progress (current volume, page count) streams into a live log on the same
-page until the EPUB is ready and shows up in the library.
+Settings → Upload manga: pick a library, drop one or more archives of raw page
+images and/or PDFs onto the upload area, and a name. **Several files can be
+selected at once** — each becomes its own conversion job and they queue up.
+
+Tick **"Add to an existing book"** to drop extra volumes into a book already in
+the library instead of creating a new one; several volumes may be queued for the
+same book at the same time, including while its original conversion still runs.
+
+Jobs are listed live on the same page with their current volume, and can be
+stopped (or removed once finished).
 
 ![Upload/conversion log](docs/screenshots/conversion-log.png)
 
@@ -336,10 +346,15 @@ On manga and PDF pages the OCR'd (or PDF-extracted) text is an invisible,
 selectable layer laid directly over the printed characters, so pop-up
 dictionaries — [Yomitan](https://github.com/themoeway/yomitan), 10ten Japanese
 Reader — look words up on hover with no white text box getting in the way
-(unlike mokuro's own reader, which reveals the recognized text on hover). Two
-positioning paths keep the selection on the glyphs instead of drifting beside
-them: mokuro-OCR'd pages place each line from the detector's own line geometry;
-PDF text-layer pages use the PDF's own coordinates.
+(unlike mokuro's own reader, which reveals the recognized text on hover).
+
+Each line stays a single element with one continuous text run, so dictionaries
+can still assemble multi-character words across it. Landing that layer *on* the
+glyphs takes some care: a detector box wraps a line's ink rather than its
+character cells, leans with the print, and is looser than the glyphs it holds —
+all of which the converter measures out (`ocrSpanSlack` / `lineGeometry` in
+`converter/epub.go`) so the overlay tracks the page instead of drifting off it.
+PDF text-layer pages skip all this and use the PDF's own coordinates.
 
 ---
 

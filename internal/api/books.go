@@ -264,10 +264,8 @@ func (s *Server) getSeriesBooks(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// bookDTOsWithProgress converts books for the grid, batch-filling the current
-// user's reading progress. Every endpoint that feeds a book grid must go
-// through this — the series listing used to skip it, so a volume's progress bar
-// (and its read state) never showed on the series page.
+// bookDTOsWithProgress batch-fills the user's reading progress. Every endpoint
+// feeding a book grid must use it, or progress bars silently never show.
 func (s *Server) bookDTOsWithProgress(r *http.Request, books []db.Book) []bookDTO {
 	var progressMap map[[16]byte]float64
 	if user, ok := userFromCtx(r); ok && len(books) > 0 {

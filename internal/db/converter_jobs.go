@@ -63,17 +63,8 @@ func GetConversionJob(ctx context.Context, pool *pgxpool.Pool, id [16]byte) (Con
 	return j, err
 }
 
-// DeleteConversionJob removes a job's DB row and returns its input/output
-// paths so the caller can also clean those up. Leaving them on disk would
-// make the job reappear on its own: converter-worker's manual-folder scan
-// (converter/watch.go) treats any "<name>-in" folder with no matching DB row
-// as an unclaimed manual conversion and picks it right back up.
-//
-// Only safe to call for a job that is NOT currently 'running' — deleting the
-// row out from under a live conversion doesn't stop the goroutine actually
-// doing the work, so os.RemoveAll(inputPath) races the still-running mokuro
-// process reading from that exact directory (see RequestStopConversionJob
-// for the running case).
+// Removes a job's row, returning its paths to clean up too — left on disk, the
+// manual scan repicks it. Not for a 'running' job: that races the live mokuro.
 func DeleteConversionJob(ctx context.Context, pool *pgxpool.Pool, id [16]byte) (inputPath, outputPath string, err error) {
 	err = pool.QueryRow(ctx,
 		`DELETE FROM conversion_jobs WHERE id = $1 RETURNING input_path, output_path`, id,
@@ -84,11 +75,8 @@ func DeleteConversionJob(ctx context.Context, pool *pgxpool.Pool, id [16]byte) (
 	return inputPath, outputPath, err
 }
 
-// RequestStopConversionJob flags a running job for cancellation instead of
-// deleting it outright. converter-worker polls stop_requested while a job's
-// mokuro subprocess is active (see converter/watch.go) and cancels it, only
-// touching any files once the process has actually exited — the row and its
-// staged files are cleaned up from the worker side after that, not here.
+// Flags a running job for cancellation rather than deleting it: the worker polls
+// this, kills mokuro, and only then cleans up the row and its files.
 func RequestStopConversionJob(ctx context.Context, pool *pgxpool.Pool, id [16]byte) error {
 	_, err := pool.Exec(ctx,
 		`UPDATE conversion_jobs SET stop_requested = true, updated_at = NOW() WHERE id = $1`, id)

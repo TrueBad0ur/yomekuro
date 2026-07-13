@@ -243,10 +243,8 @@ function hideUploadProgress() {
   uploadProgressFill.style.width = '0%';
 }
 
-// One request per file, so each lands as its own conversion job and they queue
-// up behind one another. Sequential rather than parallel: a 5GiB cap per file
-// and a single GPU behind the queue mean firing them all at once would only
-// contend for upload bandwidth without starting any conversion sooner.
+// One request per file, so each becomes its own queued job. Sequential: with one
+// GPU behind the queue, parallel uploads would only fight over bandwidth.
 function uploadOne(file, libraryId, addExisting, existingSeries, name, onProgress) {
   return new Promise((resolve) => {
     const form = new FormData();
@@ -263,9 +261,8 @@ function uploadOne(file, libraryId, addExisting, existingSeries, name, onProgres
     xhr.upload.addEventListener('progress', (e) => {
       if (e.lengthComputable) onProgress(Math.round((e.loaded / e.total) * 100), false);
     });
-    // Transfer done; the server is still extracting/staging and queuing the job
-    // (no byte-level progress for that part) — show a moving bar rather than a
-    // stalled 100% one.
+    // Transfer done, but the server is still staging and queuing — show a moving
+    // bar rather than a stalled 100% one.
     xhr.upload.addEventListener('load', () => onProgress(100, true));
     xhr.addEventListener('load', () => {
       if (xhr.status >= 200 && xhr.status < 300) { resolve(null); return; }
@@ -346,15 +343,11 @@ async function loadConversionJobs() {
     return;
   }
   list.innerHTML = jobs.map(j => {
-    // A pending/running job is still doing (or about to do) real work —
-    // clicking the button there requests a clean stop (converter-worker
-    // cancels the mokuro subprocess itself; see internal/api/converter.go's
-    // deleteConversionJob). A terminal job (done/failed/stopped) has nothing
-    // left to stop, so the same button just clears its row.
+    // A live job's button requests a clean stop (the worker cancels mokuro); a
+    // terminal one has nothing to stop, so the same button just clears the row.
     const stoppable = j.status === 'pending' || j.status === 'running';
-    // "Stopping…" only while the job is still live: a terminal job carrying a
-    // stale stop_requested would otherwise sit here disabled forever, with no
-    // way to clear it.
+    // "Stopping…" only while live: a terminal job with a stale flag would sit
+    // here disabled forever.
     const stopping = j.stop_requested && stoppable;
     const label = stopping ? 'Stopping…' : (stoppable ? 'Stop' : 'Remove');
     return `

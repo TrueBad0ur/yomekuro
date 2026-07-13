@@ -24,17 +24,13 @@ type MokuroVolume struct {
 	VolumeUUID string       `json:"volume_uuid"`
 	Pages      []MokuroPage `json:"pages"`
 
-	// Series/SeriesIndex, set by Convert (not mokuro's own JSON — hence no
-	// json tag), override the per-volume-name-derived series/index in
-	// contentOPF. Used when a batch's volumes don't share a common
-	// "Name vNN"-style naming pattern — see decideSeries in convert.go.
+	// Set by Convert (not mokuro's JSON, hence no tag): overrides the name-derived
+	// series when a batch's volumes share no "Name vNN" pattern. See decideSeries.
 	Series      string
 	SeriesIndex float64
 
-	// OCR marks a volume whose line quads came from mokuro's comic-text-detector
-	// (parseMokuroFile) rather than pdftotext bounding boxes (buildTextVolume).
-	// The two pad their quads differently, so writeLineDiv only applies the
-	// detector-calibrated offsets when this is set. Not in mokuro's JSON — no tag.
+	// Quads came from mokuro's detector, not pdftotext: the two pad differently,
+	// so writeLineDiv only applies its calibrated offsets when this is set.
 	OCR bool
 }
 
@@ -53,16 +49,12 @@ type MokuroBlock struct {
 	Lines       []string      `json:"lines"`        // one entry per line/column, index-aligned with LinesCoords
 }
 
-// mokuroProcessingLine matches mokuro's own per-volume log line (run.py's
-// "Processing i/n: path", via loguru to stderr) so onVolume can report which
-// volume just started.
+// Matches mokuro's own "Processing i/n: path" log line, so onVolume can report
+// which volume just started.
 var mokuroProcessingLine = regexp.MustCompile(`Processing \d+/\d+: (.+)`)
 
-// progressThrottleWriter forwards mokuro's output to dst. '\n'-terminated
-// lines always pass through. '\r'-terminated segments (tqdm's redraws, which
-// Docker's line-oriented log driver can't see anyway) are rewritten to real
-// lines but throttled to one in every `every`, and checked against
-// mokuroProcessingLine to report volume boundaries via onVolume.
+// Forwards mokuro's output to dst. '\r' segments (tqdm redraws, invisible to
+// Docker's line-oriented logger) become real lines, throttled to one in `every`.
 type progressThrottleWriter struct {
 	dst      *os.File
 	every    int
@@ -113,10 +105,8 @@ func (t *progressThrottleWriter) emit(line []byte) error {
 	return err
 }
 
-// runMokuro runs mokuro OCR. ctx cancellation kills the subprocess
-// (exec.CommandContext) — used to implement "Stop" on a running job, see
-// watch.go's stop-poller goroutine — and skips the retry loop, since a
-// cancellation is a deliberate stop, not a transient failure worth retrying.
+// Runs mokuro OCR. Cancelling ctx kills the subprocess (that's how Stop works)
+// and skips the retry loop — a stop is deliberate, not a transient failure.
 func runMokuro(ctx context.Context, inputDir string, volumeDirs []string, noCache bool, onVolume func(string)) error {
 	// --no-cache for specific volumes: clear just their cached results, since
 	// mokuro checks the .mokuro file's existence to skip "already processed".
