@@ -136,14 +136,24 @@ func (s *Server) uploadArchive(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	taken, err := db.ConversionJobNameTaken(r.Context(), s.db, libID, name)
-	if err != nil {
-		respondError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	if taken {
-		respondError(w, http.StatusConflict, "a conversion job with this name is already queued")
-		return
+	// Only new books need this: their staging folder is "<name>-in", so a second
+	// job under the same name would extract straight into the first one's files.
+	// Adds to an existing book each get their own randomized staging dir (below)
+	// and write differently-named EPUBs into the shared output folder, so several
+	// may legitimately be queued for the same book at once — which is exactly
+	// what uploading two volumes to it means. Enforcing the name here would
+	// instead reject the second file, and reject any add while the book's own
+	// original conversion was still running.
+	if !addToExisting {
+		taken, err := db.ConversionJobNameTaken(r.Context(), s.db, libID, name)
+		if err != nil {
+			respondError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		if taken {
+			respondError(w, http.StatusConflict, "a conversion job with this name is already queued")
+			return
+		}
 	}
 
 	// Staging dir lives inside lib.Path itself (not the system temp dir) so the

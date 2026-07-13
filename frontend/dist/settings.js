@@ -202,12 +202,16 @@ uploadAddExisting.addEventListener('change', () => {
   if (on) loadUploadSeriesPicker();
 });
 
-function setUploadFile(file) {
-  uploadFilenameLabel.textContent = file ? file.name : 'No file selected';
-  uploadFilenameLabel.classList.toggle('has-file', !!file);
+function setUploadFiles(files) {
+  const n = files ? files.length : 0;
+  uploadFilenameLabel.textContent =
+    n === 0 ? 'No file selected' :
+    n === 1 ? files[0].name :
+    `${n} files selected`;
+  uploadFilenameLabel.classList.toggle('has-file', n > 0);
 }
 
-uploadFileInput.addEventListener('change', () => setUploadFile(uploadFileInput.files[0] || null));
+uploadFileInput.addEventListener('change', () => setUploadFiles(uploadFileInput.files));
 
 ['dragenter', 'dragover'].forEach(evt => {
   uploadDropzone.addEventListener(evt, (e) => {
@@ -221,10 +225,9 @@ uploadFileInput.addEventListener('change', () => setUploadFile(uploadFileInput.f
 uploadDropzone.addEventListener('drop', (e) => {
   e.preventDefault();
   uploadDropzone.classList.remove('dragover');
-  const file = e.dataTransfer.files[0];
-  if (!file) return;
+  if (!e.dataTransfer.files.length) return;
   uploadFileInput.files = e.dataTransfer.files;
-  setUploadFile(file);
+  setUploadFiles(uploadFileInput.files);
 });
 
 function setUploadProgress(pct, label, indeterminate) {
@@ -240,7 +243,42 @@ function hideUploadProgress() {
   uploadProgressFill.style.width = '0%';
 }
 
-document.getElementById('btn-upload').addEventListener('click', () => {
+// One request per file, so each lands as its own conversion job and they queue
+// up behind one another. Sequential rather than parallel: a 5GiB cap per file
+// and a single GPU behind the queue mean firing them all at once would only
+// contend for upload bandwidth without starting any conversion sooner.
+function uploadOne(file, libraryId, addExisting, existingSeries, name, onProgress) {
+  return new Promise((resolve) => {
+    const form = new FormData();
+    form.append('library_id', libraryId);
+    if (addExisting) {
+      form.append('existing_series', existingSeries);
+    } else if (name) {
+      form.append('name', name);
+    }
+    form.append('file', file);
+
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', '/api/converter/upload');
+    xhr.upload.addEventListener('progress', (e) => {
+      if (e.lengthComputable) onProgress(Math.round((e.loaded / e.total) * 100), false);
+    });
+    // Transfer done; the server is still extracting/staging and queuing the job
+    // (no byte-level progress for that part) — show a moving bar rather than a
+    // stalled 100% one.
+    xhr.upload.addEventListener('load', () => onProgress(100, true));
+    xhr.addEventListener('load', () => {
+      if (xhr.status >= 200 && xhr.status < 300) { resolve(null); return; }
+      let msg = 'Upload failed';
+      try { msg = JSON.parse(xhr.responseText).error || msg; } catch {}
+      resolve(msg);
+    });
+    xhr.addEventListener('error', () => resolve('Upload failed'));
+    xhr.send(form);
+  });
+}
+
+document.getElementById('btn-upload').addEventListener('click', async () => {
   const errEl = document.getElementById('upload-error');
   errEl.hidden = true;
   const libraryId = selectedUploadLibraryId;
@@ -248,9 +286,9 @@ document.getElementById('btn-upload').addEventListener('click', () => {
   const name = document.getElementById('upload-name').value.trim();
   const existingSeries = uploadSeriesPicker.value;
   const fileInput = uploadFileInput;
-  const file = fileInput.files[0];
-  if (!libraryId || !file) {
-    errEl.textContent = 'Pick a library and a file';
+  const files = Array.from(fileInput.files);
+  if (!libraryId || files.length === 0) {
+    errEl.textContent = 'Pick a library and at least one file';
     errEl.hidden = false;
     return;
   }
@@ -260,66 +298,38 @@ document.getElementById('btn-upload').addEventListener('click', () => {
     return;
   }
 
-  const form = new FormData();
-  form.append('library_id', libraryId);
-  if (addExisting) {
-    form.append('existing_series', existingSeries);
-  } else if (name) {
-    form.append('name', name);
-  }
-  form.append('file', file);
-
   const btn = document.getElementById('btn-upload');
   btn.disabled = true;
-  setUploadProgress(0, 'Uploading… 0%', false);
 
-  const xhr = new XMLHttpRequest();
-  xhr.open('POST', '/api/converter/upload');
+  const failures = [];
+  for (let i = 0; i < files.length; i++) {
+    const f = files[i];
+    const prefix = files.length > 1 ? `(${i + 1}/${files.length}) ${f.name}: ` : '';
+    setUploadProgress(0, `${prefix}Uploading… 0%`, false);
+    // A typed name only makes sense for a single new book; with several files
+    // each one is named after itself.
+    const perFileName = (!addExisting && files.length === 1) ? name : '';
+    const err = await uploadOne(f, libraryId, addExisting, existingSeries, perFileName,
+      (pct, staging) => setUploadProgress(pct,
+        staging ? `${prefix}Processing…` : `${prefix}Uploading… ${pct}%`, staging));
+    if (err) failures.push(`${f.name}: ${err}`);
+    loadConversionJobs();
+  }
 
-  xhr.upload.addEventListener('progress', (e) => {
-    if (!e.lengthComputable) return;
-    const pct = Math.round((e.loaded / e.total) * 100);
-    setUploadProgress(pct, `Uploading… ${pct}%`, false);
-  });
-
-  xhr.upload.addEventListener('load', () => {
-    // Transfer done; server is now extracting/staging and queuing the job
-    // (no byte-level progress for that part) — show a moving bar instead of
-    // a stalled 100% one.
-    setUploadProgress(100, 'Processing…', true);
-  });
-
-  xhr.addEventListener('load', () => {
-    btn.disabled = false;
-    if (xhr.status >= 200 && xhr.status < 300) {
-      hideUploadProgress();
-      document.getElementById('upload-name').value = '';
-      uploadAddExisting.checked = false;
-      uploadNameField.hidden = false;
-      uploadSeriesField.hidden = true;
-      fileInput.value = ''; setUploadFile(null);
-      loadConversionJobs();
-      return;
-    }
-    hideUploadProgress();
-    document.getElementById('upload-name').value = '';
-    fileInput.value = ''; setUploadFile(null);
-    let msg = 'Upload failed';
-    try { msg = JSON.parse(xhr.responseText).error || msg; } catch {}
-    errEl.textContent = msg;
+  btn.disabled = false;
+  hideUploadProgress();
+  document.getElementById('upload-name').value = '';
+  fileInput.value = '';
+  setUploadFiles(null);
+  if (failures.length === 0) {
+    uploadAddExisting.checked = false;
+    uploadNameField.hidden = false;
+    uploadSeriesField.hidden = true;
+  } else {
+    errEl.textContent = failures.join(' · ');
     errEl.hidden = false;
-  });
-
-  xhr.addEventListener('error', () => {
-    btn.disabled = false;
-    hideUploadProgress();
-    document.getElementById('upload-name').value = '';
-    fileInput.value = ''; setUploadFile(null);
-    errEl.textContent = 'Upload failed';
-    errEl.hidden = false;
-  });
-
-  xhr.send(form);
+  }
+  loadConversionJobs();
 });
 
 async function loadConversionJobs() {
