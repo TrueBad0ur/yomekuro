@@ -24,6 +24,12 @@ func runWatch(pool *pgxpool.Pool, library string, interval time.Duration) {
 	slog.Info("watch mode started", "library", library, "poll_interval", interval)
 	ctx := context.Background()
 
+	// A previous process may have died mid-job, leaving rows marked 'running'
+	// that nothing owns any more.
+	if err := reclaimOrphanedJobs(ctx, pool); err != nil {
+		slog.Error("watch: reclaim orphaned jobs failed", "err", err)
+	}
+
 	go func() {
 		for {
 			drainQueue(ctx, pool)

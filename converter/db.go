@@ -2,10 +2,46 @@ package main
 
 import (
 	"context"
+	"log/slog"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
+
+// reclaimOrphanedJobs cleans up rows the previous worker process left behind.
+//
+// Only one worker ever drains the queue, so a job still marked 'running' at
+// startup has nobody owning it: the goroutine that claimed it died with the old
+// process. Nothing would ever move it on — claimNextJob only picks up 'pending',
+// and the API refuses to delete a 'running' row (it assumes a live mokuro
+// subprocess is reading its files). The job would sit in the UI forever, and if
+// a stop had been requested it would sit there as an unremovable "Stopping…".
+func reclaimOrphanedJobs(ctx context.Context, pool *pgxpool.Pool) error {
+	// Asked to stop before the restart — honour that rather than resuming it.
+	stopped, err := pool.Exec(ctx,
+		`UPDATE conversion_jobs
+		    SET status='stopped', current_volume='', stop_requested=false, updated_at=NOW()
+		  WHERE status='running' AND stop_requested`)
+	if err != nil {
+		return err
+	}
+	// Otherwise put it back in the queue. mokuro caches per-volume OCR results,
+	// so a resumed batch picks up where it left off instead of redoing it all.
+	requeued, err := pool.Exec(ctx,
+		`UPDATE conversion_jobs
+		    SET status='pending', current_volume='', updated_at=NOW()
+		  WHERE status='running'`)
+	if err != nil {
+		return err
+	}
+	if n := stopped.RowsAffected(); n > 0 {
+		slog.Info("watch: orphaned jobs marked stopped", "count", n)
+	}
+	if n := requeued.RowsAffected(); n > 0 {
+		slog.Info("watch: orphaned jobs requeued", "count", n)
+	}
+	return nil
+}
 
 // job is a claimed row from yomekuro's conversion_jobs table (upload-driven
 // path). id is kept as text — this module has no need for a UUID type beyond
