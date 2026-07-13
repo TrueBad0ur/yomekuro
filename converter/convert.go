@@ -40,16 +40,15 @@ func Convert(ctx context.Context, input, output, volume string, noCache bool, on
 	}
 
 	// Decided upfront: later steps restructure the directory, so deciding this
-	// incrementally could change the answer partway through a batch.
-	var series string
-	var seriesIndex map[string]float64
-	if volume == "" {
-		names, err := candidateVolumeNames(input)
-		if err != nil {
-			return 0, 0, fmt.Errorf("read input dir: %w", err)
-		}
-		series, seriesIndex = decideSeries(names, output)
+	// incrementally could change the answer partway through a batch. Always from
+	// every candidate name in input, even when volume narrows the actual OCR run
+	// to one of them — otherwise a single-volume reconvert would see itself as
+	// the only volume and get treated as its own standalone one-book series.
+	names, err := candidateVolumeNames(input)
+	if err != nil {
+		return 0, 0, fmt.Errorf("read input dir: %w", err)
 	}
+	series, seriesIndex := decideSeries(names, output)
 
 	if err := convertJXLPages(input); err != nil {
 		return 0, 0, fmt.Errorf("convert jxl pages: %w", err)

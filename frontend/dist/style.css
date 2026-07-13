@@ -312,9 +312,10 @@ body.page-library { display: flex; min-height: 100vh; }
   padding: 0;
   font-size: 1rem;
   line-height: 1;
-  background: rgba(0,0,0,.45);
+  background: rgba(0,0,0,.55);
   color: #fff;
-  border: none;
+  border: 1px solid rgba(255,255,255,.8);
+  box-shadow: 0 0 0 1px rgba(0,0,0,.4);
   border-radius: 4px;
   cursor: pointer;
   opacity: 0;
@@ -822,6 +823,40 @@ body.page-settings { max-width: 1080px; margin: 0 auto; padding: 0 1.5rem 3rem; 
 .job-status-done     { color: #4caf7d; font-weight: 600; }
 .job-status-failed   { color: #e07070; font-weight: 600; }
 
+.job-reconvert-badge {
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: var(--accent);
+  border: 1px solid var(--accent);
+  border-radius: 4px;
+  padding: 0.05rem 0.35rem;
+  vertical-align: middle;
+}
+
+.reconvert-btn { padding: 0.35rem 0.9rem; font-size: 0.82rem; }
+
+.reconvert-volumes {
+  margin-top: 0.6rem;
+  padding-top: 0.6rem;
+  border-top: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+.reconvert-volume-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+.reconvert-volume-name {
+  font-size: 0.82rem;
+  color: var(--text-dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .upload-hint { color: var(--text-dim); font-size: 0.82rem; margin: 0 0 1.1rem; }
 
 .upload-field { margin-bottom: 0.9rem; }
@@ -1020,4 +1055,11 @@ body.page-settings { max-width: 1080px; margin: 0 auto; padding: 0 1.5rem 3rem; 
   .main-wrap { margin-left: 0; }
   .hamburger { display: block; }
   .books-grid { grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 0.9rem; padding: 1rem; }
+}
+
+/* A two-page spread doesn't fit a phone screen; keep manga single-page only.
+   Keyed off pointer type, not width — width alone flips in landscape, which is
+   exactly how manga tends to get read on a phone. */
+@media (pointer: coarse) {
+  #btn-spread { display: none !important; }
 }

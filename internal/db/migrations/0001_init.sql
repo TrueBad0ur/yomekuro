@@ -80,6 +80,8 @@ CREATE TABLE conversion_jobs (
     error       TEXT NOT NULL DEFAULT '',
     current_volume TEXT NOT NULL DEFAULT '',
     stop_requested BOOLEAN NOT NULL DEFAULT false,
+    force_ocr   BOOLEAN NOT NULL DEFAULT false, -- reconvert: full OCR re-run, ignoring mokuro's cache
+    volume      TEXT NOT NULL DEFAULT '', -- reconvert: limit to one volume; '' means the whole book
     created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );

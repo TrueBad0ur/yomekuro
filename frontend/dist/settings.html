@@ -23,7 +23,8 @@
   <div class="settings-layout">
     <nav class="settings-nav">
       <a href="#libraries" class="settings-nav-link active">Libraries</a>
-      <a href="#upload" class="settings-nav-link">Upload manga</a>
+      <a href="#upload" class="settings-nav-link">Uploading</a>
+      <a href="#books" class="settings-nav-link">Converting</a>
       <a href="#users-section" class="settings-nav-link">Users</a>
     </nav>
 
@@ -43,7 +44,7 @@
       </section>
 
       <section class="settings-section" id="upload">
-        <h2 class="settings-section-title">Upload manga</h2>
+        <h2 class="settings-section-title">Uploading</h2>
         <p class="upload-hint">
           A .zip/.tar/.tar.gz/.tar.xz/.7z/.rar of raw page images (one subfolder per volume,
           or images directly for a single volume), or a .pdf. Text-layer PDFs convert
@@ -90,6 +91,22 @@
           <span id="upload-progress-label" class="upload-progress-label"></span>
         </div>
         <div id="conversion-jobs" class="settings-libraries" style="margin-top:.75rem"></div>
+      </section>
+
+      <section class="settings-section" id="books">
+        <h2 class="settings-section-title">Converting</h2>
+        <p class="upload-hint">
+          Reconvert a book — or just one of its volumes — with a full OCR re-run, useful after a
+          converter/mokuro update. This redoes OCR from the original raw scan (not a rebuild from
+          cached results), so it takes as long as the first conversion did. Only books converted
+          from a raw scan (not a plain EPUB upload) can be reconverted, and only while their
+          staged raw scan is still on disk.
+        </p>
+        <div class="upload-field">
+          <span class="upload-field-label">Library</span>
+          <div id="books-library-picker" class="library-picker"></div>
+        </div>
+        <div id="books-list" class="settings-libraries" style="margin-top:.75rem"></div>
       </section>
 
       <section class="settings-section" id="users-section">

@@ -90,7 +90,7 @@ func processQueuedJob(ctx context.Context, pool *pgxpool.Pool, j *job) {
 			slog.Warn("watch: update current volume failed", "job", j.Name, "err", err)
 		}
 	}
-	ok, fail, err := Convert(jobCtx, j.InputPath, j.OutputPath, "", false, onVolume)
+	ok, fail, err := Convert(jobCtx, j.InputPath, j.OutputPath, j.Volume, j.ForceOCR, onVolume)
 
 	switch {
 	case jobCtx.Err() != nil:
@@ -98,7 +98,7 @@ func processQueuedJob(ctx context.Context, pool *pgxpool.Pool, j *job) {
 		// failure (the parent ctx is always Background).
 		slog.Info("watch: conversion stopped", "job", j.Name, "volumes_done", ok)
 		markJobStopped(ctx, pool, j.ID)
-		if ok == 0 {
+		if ok == 0 && !j.ForceOCR {
 			cleanupFailedJob(j.Name, j.InputPath, j.OutputPath)
 		}
 	case err != nil || fail > 0 || ok == 0:
@@ -113,7 +113,9 @@ func processQueuedJob(ctx context.Context, pool *pgxpool.Pool, j *job) {
 		markJobFailed(ctx, pool, j.ID, msg)
 		// ok > 0 means some volumes already converted, so only wipe the staging
 		// folders when nothing at all succeeded — else this deletes real output.
-		if ok == 0 {
+		// A reconvert job's paths are the book's real, shared dirs, not a fresh
+		// staging dir, so never wipe those even on total failure.
+		if ok == 0 && !j.ForceOCR {
 			cleanupFailedJob(j.Name, j.InputPath, j.OutputPath)
 		}
 	default:

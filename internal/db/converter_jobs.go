@@ -18,6 +18,8 @@ type ConversionJob struct {
 	Error         string
 	CurrentVolume string
 	StopRequested bool
+	ForceOCR      bool
+	Volume        string
 	CreatedAt     time.Time
 	UpdatedAt     time.Time
 }
@@ -27,15 +29,30 @@ func CreateConversionJob(ctx context.Context, pool *pgxpool.Pool, libraryID [16]
 	err := pool.QueryRow(ctx,
 		`INSERT INTO conversion_jobs (library_id, name, input_path, output_path)
 		 VALUES ($1, $2, $3, $4)
-		 RETURNING id, library_id, name, input_path, output_path, status, error, current_volume, stop_requested, created_at, updated_at`,
+		 RETURNING id, library_id, name, input_path, output_path, status, error, current_volume, stop_requested, force_ocr, volume, created_at, updated_at`,
 		libraryID, name, inputPath, outputPath,
-	).Scan(&j.ID, &j.LibraryID, &j.Name, &j.InputPath, &j.OutputPath, &j.Status, &j.Error, &j.CurrentVolume, &j.StopRequested, &j.CreatedAt, &j.UpdatedAt)
+	).Scan(&j.ID, &j.LibraryID, &j.Name, &j.InputPath, &j.OutputPath, &j.Status, &j.Error, &j.CurrentVolume, &j.StopRequested, &j.ForceOCR, &j.Volume, &j.CreatedAt, &j.UpdatedAt)
+	return j, err
+}
+
+// CreateReconvertJob queues a full OCR re-run over an existing book's already-staged
+// input/output dirs — unlike a fresh upload, mokuro's cache is bypassed entirely.
+// An empty volume reconverts every volume in the book; a non-empty one limits the
+// run to just that volume (matching the epub's basename in the output dir).
+func CreateReconvertJob(ctx context.Context, pool *pgxpool.Pool, libraryID [16]byte, name, inputPath, outputPath, volume string) (ConversionJob, error) {
+	var j ConversionJob
+	err := pool.QueryRow(ctx,
+		`INSERT INTO conversion_jobs (library_id, name, input_path, output_path, force_ocr, volume)
+		 VALUES ($1, $2, $3, $4, true, $5)
+		 RETURNING id, library_id, name, input_path, output_path, status, error, current_volume, stop_requested, force_ocr, volume, created_at, updated_at`,
+		libraryID, name, inputPath, outputPath, volume,
+	).Scan(&j.ID, &j.LibraryID, &j.Name, &j.InputPath, &j.OutputPath, &j.Status, &j.Error, &j.CurrentVolume, &j.StopRequested, &j.ForceOCR, &j.Volume, &j.CreatedAt, &j.UpdatedAt)
 	return j, err
 }
 
 func ListConversionJobs(ctx context.Context, pool *pgxpool.Pool) ([]ConversionJob, error) {
 	rows, err := pool.Query(ctx,
-		`SELECT id, library_id, name, input_path, output_path, status, error, current_volume, stop_requested, created_at, updated_at
+		`SELECT id, library_id, name, input_path, output_path, status, error, current_volume, stop_requested, force_ocr, volume, created_at, updated_at
 		 FROM conversion_jobs ORDER BY created_at DESC`)
 	if err != nil {
 		return nil, err
@@ -45,7 +62,7 @@ func ListConversionJobs(ctx context.Context, pool *pgxpool.Pool) ([]ConversionJo
 	var jobs []ConversionJob
 	for rows.Next() {
 		var j ConversionJob
-		if err := rows.Scan(&j.ID, &j.LibraryID, &j.Name, &j.InputPath, &j.OutputPath, &j.Status, &j.Error, &j.CurrentVolume, &j.StopRequested, &j.CreatedAt, &j.UpdatedAt); err != nil {
+		if err := rows.Scan(&j.ID, &j.LibraryID, &j.Name, &j.InputPath, &j.OutputPath, &j.Status, &j.Error, &j.CurrentVolume, &j.StopRequested, &j.ForceOCR, &j.Volume, &j.CreatedAt, &j.UpdatedAt); err != nil {
 			return nil, err
 		}
 		jobs = append(jobs, j)
@@ -57,9 +74,9 @@ func ListConversionJobs(ctx context.Context, pool *pgxpool.Pool) ([]ConversionJo
 func GetConversionJob(ctx context.Context, pool *pgxpool.Pool, id [16]byte) (ConversionJob, error) {
 	var j ConversionJob
 	err := pool.QueryRow(ctx,
-		`SELECT id, library_id, name, input_path, output_path, status, error, current_volume, stop_requested, created_at, updated_at
+		`SELECT id, library_id, name, input_path, output_path, status, error, current_volume, stop_requested, force_ocr, volume, created_at, updated_at
 		 FROM conversion_jobs WHERE id = $1`, id,
-	).Scan(&j.ID, &j.LibraryID, &j.Name, &j.InputPath, &j.OutputPath, &j.Status, &j.Error, &j.CurrentVolume, &j.StopRequested, &j.CreatedAt, &j.UpdatedAt)
+	).Scan(&j.ID, &j.LibraryID, &j.Name, &j.InputPath, &j.OutputPath, &j.Status, &j.Error, &j.CurrentVolume, &j.StopRequested, &j.ForceOCR, &j.Volume, &j.CreatedAt, &j.UpdatedAt)
 	return j, err
 }
 

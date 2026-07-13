@@ -21,6 +21,8 @@ let fixedDoc2 = null;
 let fixedChapterBase2 = '';
 let spreadMode = false;
 let zoomLevel = 1.0;
+let fusedHalf = 0; // which physical half (0=left crop, 1=right crop) of a fused-spread page is shown
+let pendingFusedHalf = null; // goPrev/goNext set this right before loadChapter to land on a specific half
 const ZOOM_STEP = 1.3;
 const ZOOM_MAX  = 6.0;
 
@@ -46,7 +48,15 @@ btnTOC.addEventListener('click', openTOC);
 tocClose.addEventListener('click', closeTOC);
 tocOverlay.addEventListener('click', closeTOC);
 
+// A two-page spread only makes sense on a device with a mouse/trackpad-sized
+// screen — never on a phone, however spreadMode is set. Detected by pointer
+// type, not viewport width: width alone flips in landscape (very much how
+// manga gets read), where a phone's width easily exceeds any fixed px cutoff.
+function isMobileViewport() { return window.matchMedia('(pointer: coarse)').matches; }
+function effectiveSpread() { return spreadMode && !isMobileViewport(); }
+
 btnSpread.addEventListener('click', async () => {
+  if (isMobileViewport()) return;
   spreadMode = !spreadMode;
   btnSpread.classList.toggle('active', spreadMode);
   await loadChapter(spineIndex, false);
@@ -191,9 +201,8 @@ function showBmPopup(x, y) {
   bmPopup.addEventListener('click', e => e.stopPropagation());
 }
 
-// Text selection → bookmark
+// Text selection → bookmark (desktop: any mouse selection; touch: gated below)
 document.addEventListener('mouseup', onSelectionEnd);
-document.addEventListener('touchend', onSelectionEnd);
 
 function onSelectionEnd() {
   const sel = window.getSelection();
@@ -234,6 +243,76 @@ content.addEventListener('click', (e) => {
 });
 
 document.addEventListener('click', hideBmPopup);
+
+// ── Touch gestures: long-press to select, swipe/tap-zone to page ───────────────
+// A bare tap must never select text — only a genuine long-press does. Swipe and
+// tap-zones give fixed-layout (manga) a way to turn pages beyond the tiny nav buttons.
+
+const LONG_PRESS_MS = 500;
+const TAP_MOVE_TOLERANCE = 10;
+const SWIPE_THRESHOLD = 60;
+
+let touchStartX = 0, touchStartY = 0, touchStartTime = 0, touchMoved = false;
+
+function isInteractiveTarget(target) {
+  return !!target.closest(
+    'button, a, input, textarea, .reader-nav, .reader-bottom-nav, .toc-panel, ' +
+    '.toc-overlay, .book-menu-popup, .bm-popup, .tag-editor-popup, mark.reading-mark'
+  );
+}
+
+function handleSwipe(dx, target) {
+  if (!isFixedLayout || isInteractiveTarget(target)) return;
+  const rtl = manifest && manifest.reading_direction === 'rtl';
+  if (dx < 0) { rtl ? goPrev() : goNext(); } else { rtl ? goNext() : goPrev(); }
+}
+
+function handleTap(x, target) {
+  if (!isFixedLayout || isInteractiveTarget(target)) return;
+  const w = window.innerWidth;
+  const rtl = manifest && manifest.reading_direction === 'rtl';
+  if (x < w * 0.3) { rtl ? goNext() : goPrev(); }
+  else if (x > w * 0.7) { rtl ? goPrev() : goNext(); }
+}
+
+document.addEventListener('touchstart', (e) => {
+  if (e.touches.length !== 1) return;
+  touchStartX = e.touches[0].clientX;
+  touchStartY = e.touches[0].clientY;
+  touchStartTime = Date.now();
+  touchMoved = false;
+}, { passive: true });
+
+document.addEventListener('touchmove', (e) => {
+  if (e.touches.length !== 1) return;
+  const dx = e.touches[0].clientX - touchStartX;
+  const dy = e.touches[0].clientY - touchStartY;
+  if (Math.hypot(dx, dy) > TAP_MOVE_TOLERANCE) touchMoved = true;
+}, { passive: true });
+
+document.addEventListener('touchend', (e) => {
+  const elapsed = Date.now() - touchStartTime;
+  const touch = e.changedTouches[0];
+  const endX = touch ? touch.clientX : touchStartX;
+  const endY = touch ? touch.clientY : touchStartY;
+  const dx = endX - touchStartX;
+  const dy = endY - touchStartY;
+
+  if (!touchMoved && elapsed >= LONG_PRESS_MS) {
+    onSelectionEnd();
+    return;
+  }
+
+  // Not a long-press: don't let an incidental selection turn into a bookmark.
+  const sel = window.getSelection();
+  if (sel && !sel.isCollapsed) sel.removeAllRanges();
+
+  if (touchMoved && elapsed < 600 && Math.abs(dx) > SWIPE_THRESHOLD && Math.abs(dx) > Math.abs(dy) * 1.5) {
+    handleSwipe(dx, e.target);
+  } else if (!touchMoved && elapsed < LONG_PRESS_MS) {
+    handleTap(endX, e.target);
+  }
+});
 
 // ── Init ──────────────────────────────────────────────────────────────────────
 
@@ -309,8 +388,10 @@ async function loadChapter(index, restoreScroll) {
     fixedDoc2 = null;
     fixedChapterBase2 = '';
     content.className = 'reader-content';
+    fusedHalf = pendingFusedHalf !== null ? pendingFusedHalf : firstHalfInReadingOrder();
+    pendingFusedHalf = null;
 
-    if (spreadMode && spineIndex + 1 < manifest.spine.length) {
+    if (effectiveSpread() && !isFusedSpreadPage(fixedDoc) && spineIndex + 1 < manifest.spine.length) {
       const item2 = manifest.spine[spineIndex + 1];
       try {
         const res2 = await fetch(`/api/books/${bookId}/content/${item2.href}`, { cache: 'no-store' });
@@ -422,23 +503,77 @@ function parsePx(styleStr, prop) {
   return m ? parseInt(m[1], 10) : 0;
 }
 
+// Some scans are pre-fused two-page spreads (both facing pages photographed as
+// one wide image) rather than one image per physical page — width/height alone
+// tells them apart from a normal portrait page. Spread mode must never combine
+// one of these with a neighbour: that would show two spreads (four pages) at
+// once instead of the one spread the image already is.
+const SPREAD_ASPECT_THRESHOLD = 1.15;
+
+function isFusedSpreadPage(doc) {
+  const bodyDiv = doc && doc.body ? doc.body.firstElementChild : null;
+  const styleStr = bodyDiv ? (bodyDiv.getAttribute('style') || '') : '';
+  const pw = parsePx(styleStr, 'width');
+  const ph = parsePx(styleStr, 'height');
+  return pw > 0 && ph > 0 && (pw / ph) >= SPREAD_ASPECT_THRESHOLD;
+}
+
+// Whether the current page renders combined with a neighbour — false whenever
+// spread mode is off, or the current page is already a fused spread.
+function isRenderingSpread() {
+  return effectiveSpread() && isFixedLayout && fixedDoc && !isFusedSpreadPage(fixedDoc);
+}
+
+// A fused-spread page shows as one cropped half by default (single-page mode),
+// and only as the full original image once Spread is turned on — Spread mode
+// on such a page means "show the spread that's already there", not "combine
+// with a neighbour".
+function shouldCropHalf(doc) {
+  return isFusedSpreadPage(doc) && !effectiveSpread();
+}
+
+// Which physical half (0=left, 1=right) is read first — the right one for RTL
+// manga, since the right page comes first in reading order.
+function firstHalfInReadingOrder() {
+  return (manifest && manifest.reading_direction === 'rtl') ? 1 : 0;
+}
+
 function renderCurrentFixed() {
   if (!fixedDoc) return;
-  if (spreadMode && fixedDoc2) {
+  if (isRenderingSpread() && fixedDoc2) {
     renderFixedSpread(fixedDoc, fixedChapterBase, fixedDoc2, fixedChapterBase2);
   } else {
     renderFixedPage(fixedDoc, fixedChapterBase);
   }
 }
 
-function buildPageWrapper(bodyDiv, chapterBase, pw, ph, totalScale, left) {
+// halfIndex null renders the page in full; 0/1 clips to just that half (left/
+// right), keeping the inner content at its real pw×ph size so the OCR overlay
+// divs' absolute px positions (measured against the full image) stay correct —
+// only the wrapper's width and an inner offset change, nothing about the text
+// layer's own coordinates.
+function buildPageWrapper(bodyDiv, chapterBase, pw, ph, totalScale, left, halfIndex) {
+  const half = halfIndex != null;
+  const outerW = half ? pw / 2 : pw;
+
   const wrapper = document.createElement('div');
   wrapper.style.cssText = [
     'position:absolute', 'top:0', `left:${left}px`,
-    `width:${pw}px`, `height:${ph}px`,
+    `width:${outerW}px`, `height:${ph}px`,
     `transform:scale(${totalScale})`, 'transform-origin:top left',
     'overflow:hidden',
   ].join(';');
+
+  let inner = wrapper;
+  if (half) {
+    inner = document.createElement('div');
+    inner.style.cssText = [
+      'position:absolute', 'top:0', `left:${-halfIndex * (pw / 2)}px`,
+      `width:${pw}px`, `height:${ph}px`,
+    ].join(';');
+    wrapper.appendChild(inner);
+  }
+
   for (const child of Array.from(bodyDiv.children)) {
     const tag = child.nodeName.toLowerCase();
     if (tag === 'img') {
@@ -446,12 +581,12 @@ function buildPageWrapper(bodyDiv, chapterBase, pw, ph, totalScale, left) {
       img.style.cssText = 'position:absolute;top:0;left:0;width:100%;height:100%;display:block;';
       img.src = resolveURL(chapterBase, child.getAttribute('src') || '');
       img.alt = child.getAttribute('alt') || '';
-      wrapper.appendChild(img);
+      inner.appendChild(img);
     } else {
       const overlay = document.createElement('div');
       overlay.style.cssText = child.getAttribute('style') || '';
       overlay.textContent = child.textContent || '';
-      wrapper.appendChild(overlay);
+      inner.appendChild(overlay);
     }
   }
   return wrapper;
@@ -518,14 +653,18 @@ function renderFixedPage(doc, chapterBase) {
   const pw = parsePx(styleStr, 'width')  || 1350;
   const ph = parsePx(styleStr, 'height') || 1920;
 
+  const crop = shouldCropHalf(doc);
+  const halfIndex = crop ? fusedHalf : null;
+  const effectivePW = crop ? pw / 2 : pw;
+
   const navEl = document.querySelector('.reader-nav');
   const navH  = navEl ? navEl.offsetHeight : 56;
   const vw = window.innerWidth;
   const vh = window.innerHeight - navH;
 
-  const baseScale  = Math.min(vw / pw, vh / ph);
+  const baseScale  = Math.min(vw / effectivePW, vh / ph);
   const totalScale = baseScale * zoomLevel;
-  const scaledW    = Math.ceil(pw * totalScale);
+  const scaledW    = Math.ceil(effectivePW * totalScale);
   const scaledH    = Math.ceil(ph * totalScale);
 
   content.style.cssText = `position:fixed;top:${navH}px;left:0;right:0;bottom:0;overflow:auto;background:#000;`;
@@ -535,7 +674,7 @@ function renderFixedPage(doc, chapterBase) {
   scroller.style.cssText = `position:relative;width:${scrollerW}px;height:${scaledH}px;`;
 
   const leftPad = Math.max(0, Math.floor((scrollerW - scaledW) / 2));
-  scroller.appendChild(buildPageWrapper(bodyDiv, chapterBase, pw, ph, totalScale, leftPad));
+  scroller.appendChild(buildPageWrapper(bodyDiv, chapterBase, pw, ph, totalScale, leftPad, halfIndex));
   content.appendChild(scroller);
   content.scrollTop  = 0;
   content.scrollLeft = 0;
@@ -619,18 +758,44 @@ function updateNav() {
   const info  = `${spineIndex + 1} / ${total}`;
   navInfo.textContent  = info;
   bottomInfo.textContent = info;
-  btnPrev.disabled  = btnPrevB.disabled  = spineIndex <= 0;
-  btnNext.disabled  = btnNextB.disabled  = spineIndex >= total - 1;
+  // At the book's edge, prev/next is only a true no-op once any fused-page half
+  // stepping is exhausted too — otherwise there's still a half left to show.
+  const onFirstHalf = !onFusedHalf() || fusedHalf === firstHalfInReadingOrder();
+  const onLastHalf  = !onFusedHalf() || fusedHalf === 1 - firstHalfInReadingOrder();
+  btnPrev.disabled  = btnPrevB.disabled  = spineIndex <= 0 && onFirstHalf;
+  btnNext.disabled  = btnNextB.disabled  = spineIndex >= total - 1 && onLastHalf;
+}
+
+// A fused-spread page is two logical pages in single-page mode: step within
+// its two halves before actually moving the spine index.
+function onFusedHalf() {
+  return isFixedLayout && !effectiveSpread() && fixedDoc && isFusedSpreadPage(fixedDoc);
 }
 
 async function goPrev() {
+  if (onFusedHalf() && fusedHalf !== firstHalfInReadingOrder()) {
+    saveProgress();
+    fusedHalf = firstHalfInReadingOrder();
+    renderCurrentFixed();
+    updateNav();
+    return;
+  }
   saveProgress();
-  const step = (spreadMode && isFixedLayout) ? 2 : 1;
+  const step = isRenderingSpread() ? 2 : 1;
+  pendingFusedHalf = 1 - firstHalfInReadingOrder(); // enter the previous page from its far end
   await loadChapter(Math.max(0, spineIndex - step), false);
 }
 async function goNext() {
+  if (onFusedHalf() && fusedHalf !== 1 - firstHalfInReadingOrder()) {
+    saveProgress();
+    fusedHalf = 1 - firstHalfInReadingOrder();
+    renderCurrentFixed();
+    updateNav();
+    return;
+  }
   saveProgress();
-  const step = (spreadMode && isFixedLayout) ? 2 : 1;
+  const step = isRenderingSpread() ? 2 : 1;
+  pendingFusedHalf = firstHalfInReadingOrder();
   await loadChapter(Math.min(manifest.spine.length - 1, spineIndex + step), false);
 }
 

@@ -24,7 +24,7 @@ function init() {
 
 // ── Settings nav (one category visible at a time) ────────────────────────────
 
-const SETTINGS_SECTIONS = ['libraries', 'upload', 'users-section'];
+const SETTINGS_SECTIONS = ['libraries', 'upload', 'books', 'users-section'];
 
 function showSettingsSection(id) {
   if (!SETTINGS_SECTIONS.includes(id)) id = 'libraries';
@@ -67,6 +67,7 @@ async function loadLibraries() {
   list.innerHTML = '';
 
   renderUploadLibraryPicker(libs.items || []);
+  renderBooksLibraryPicker(libs.items || []);
 
   for (const lib of (libs.items || [])) {
     const card = document.createElement('div');
@@ -352,7 +353,7 @@ async function loadConversionJobs() {
     const label = stopping ? 'Stopping…' : (stoppable ? 'Stop' : 'Remove');
     return `
     <div class="library-card">
-      <div class="library-card-name">${esc(j.name)}</div>
+      <div class="library-card-name">${esc(j.name)}${j.force_ocr ? ` <span class="job-reconvert-badge">${j.volume ? 'OCR re-run: ' + esc(j.volume) : 'OCR re-run'}</span>` : ''}</div>
       ${j.status === 'running' && j.current_volume ? `<div class="job-current-volume">${esc(j.current_volume)}</div>` : ''}
       <div class="library-card-footer">
         <span class="library-card-count job-status-${esc(j.status)}">${esc(j.status)}</span>
@@ -373,6 +374,105 @@ document.getElementById('conversion-jobs').addEventListener('click', async (e) =
     loadConversionJobs();
   } catch {
     btn.disabled = false;
+  }
+});
+
+// ── Books: per-series full-OCR reconvert ────────────────────────────────────────
+
+const booksLibraryPicker = document.getElementById('books-library-picker');
+let selectedBooksLibraryId = '';
+
+function renderBooksLibraryPicker(libraries) {
+  booksLibraryPicker.innerHTML = '';
+  if (!selectedBooksLibraryId && libraries.length > 0) {
+    selectedBooksLibraryId = libraries[0].id;
+  }
+  for (const lib of libraries) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'library-pick-btn';
+    btn.classList.toggle('active', lib.id === selectedBooksLibraryId);
+    btn.textContent = lib.name;
+    btn.addEventListener('click', () => {
+      selectedBooksLibraryId = lib.id;
+      booksLibraryPicker.querySelectorAll('.library-pick-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      loadBooksList();
+    });
+    booksLibraryPicker.appendChild(btn);
+  }
+  loadBooksList();
+}
+
+async function loadBooksList() {
+  const list = document.getElementById('books-list');
+  if (!selectedBooksLibraryId) { list.innerHTML = ''; return; }
+  list.innerHTML = '<p style="color:var(--text-dim);font-size:.88rem">Loading…</p>';
+  let data;
+  try {
+    data = await fetch(`/api/converter/reconvertable?library=${selectedBooksLibraryId}`).then(r => r.json());
+  } catch {
+    list.innerHTML = '<p style="color:var(--text-dim)">Failed to load books.</p>';
+    return;
+  }
+  const items = data.items || [];
+  if (items.length === 0) {
+    list.innerHTML = '<p style="color:var(--text-dim);font-size:.88rem">No reconvertible books in this library (only books converted from a raw scan, with the scan still on disk, are eligible).</p>';
+    return;
+  }
+  list.innerHTML = items.map(s => {
+    const volumeRows = s.volumes.map(v => `
+      <div class="reconvert-volume-row">
+        <span class="reconvert-volume-name">${esc(v)}</span>
+        <button class="reconvert-btn" data-name="${esc(s.name)}" data-volume="${esc(v)}">Reconvert (full OCR)</button>
+      </div>`).join('');
+    return `
+    <div class="library-card">
+      <div class="library-card-name">${esc(s.name)}</div>
+      <div class="library-card-footer">
+        <span class="library-card-count">${s.volumes.length} volume${s.volumes.length === 1 ? '' : 's'}</span>
+        <button class="reconvert-btn" data-name="${esc(s.name)}">Reconvert all (full OCR)</button>
+      </div>
+      <p class="reconvert-error" style="color:#e07070;font-size:.78rem;margin:.35rem 0 0" hidden></p>
+      ${volumeRows ? `<div class="reconvert-volumes">${volumeRows}</div>` : ''}
+    </div>`;
+  }).join('');
+}
+
+document.getElementById('books-list').addEventListener('click', async (e) => {
+  const btn = e.target.closest('.reconvert-btn');
+  if (!btn) return;
+  const card = btn.closest('.library-card');
+  const errEl = card.querySelector('.reconvert-error');
+  const label = btn.dataset.volume ? 'Reconvert (full OCR)' : 'Reconvert all (full OCR)';
+  errEl.hidden = true;
+  btn.disabled = true;
+  btn.textContent = 'Queuing…';
+  try {
+    const res = await fetch('/api/converter/reconvert', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        library_id: selectedBooksLibraryId,
+        name: btn.dataset.name,
+        volume: btn.dataset.volume || '',
+      }),
+    });
+    if (!res.ok) {
+      const d = await res.json().catch(() => ({}));
+      errEl.textContent = d.error || 'Failed to queue reconvert';
+      errEl.hidden = false;
+      btn.disabled = false;
+      btn.textContent = label;
+      return;
+    }
+    btn.textContent = 'Queued';
+    loadConversionJobs();
+  } catch {
+    errEl.textContent = 'Failed to queue reconvert';
+    errEl.hidden = false;
+    btn.disabled = false;
+    btn.textContent = label;
   }
 });
 

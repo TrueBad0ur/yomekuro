@@ -78,6 +78,8 @@ func NewRouter(pool *pgxpool.Pool, sc *scanner.Scanner, w *scanner.Watcher, data
 			r.Post("/api/libraries/{id}/scan", s.triggerScan)
 
 			r.Post("/api/converter/upload", s.uploadArchive)
+			r.Get("/api/converter/reconvertable", s.listReconvertable)
+			r.Post("/api/converter/reconvert", s.reconvertSeries)
 			r.Get("/api/converter/jobs", s.listConversionJobs)
 			r.Delete("/api/converter/jobs/{id}", s.deleteConversionJob)
 
@@ -90,10 +92,15 @@ func NewRouter(pool *pgxpool.Pool, sc *scanner.Scanner, w *scanner.Watcher, data
 		})
 	})
 
-	// Serve frontend — clean URLs + static assets
+	// Serve frontend — clean URLs + static assets. no-cache (not no-store): the
+	// embedded files carry no Last-Modified/ETag for the browser to revalidate
+	// against, so this is the only thing stopping a stale reader.js/style.css
+	// surviving in a phone's cache across a redeploy.
 	sub, _ := fs.Sub(frontend.FS, "dist")
 	fileServer := http.FileServer(http.FS(sub))
+	noCache := func(w http.ResponseWriter) { w.Header().Set("Cache-Control", "no-cache") }
 	r.Get("/reader", func(w http.ResponseWriter, r *http.Request) {
+		noCache(w)
 		http.ServeFileFS(w, r, sub, "reader.html")
 	})
 	r.Get("/settings", func(w http.ResponseWriter, r *http.Request) {
@@ -102,12 +109,19 @@ func NewRouter(pool *pgxpool.Pool, sc *scanner.Scanner, w *scanner.Watcher, data
 			http.Redirect(w, r, "/", http.StatusSeeOther)
 			return
 		}
+		noCache(w)
 		http.ServeFileFS(w, r, sub, "settings.html")
 	})
 	r.Get("/login", func(w http.ResponseWriter, r *http.Request) {
+		noCache(w)
 		http.ServeFileFS(w, r, sub, "login.html")
 	})
-	r.Handle("/*", fileServer)
+	r.Handle("/*", func() http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			noCache(w)
+			fileServer.ServeHTTP(w, r)
+		})
+	}())
 
 	return r
 }

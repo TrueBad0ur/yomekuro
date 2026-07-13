@@ -3,15 +3,15 @@ module github.com/truebad0ur/yomekuro
 go 1.25.0
 
 require (
-	github.com/beevik/etree v1.6.0
-	github.com/bodgit/sevenzip v1.6.4
+	github.com/beevik/etree v1.7.0
+	github.com/bodgit/sevenzip v1.6.5
 	github.com/fsnotify/fsnotify v1.10.1
-	github.com/go-chi/chi/v5 v5.3.0
+	github.com/go-chi/chi/v5 v5.3.1
 	github.com/jackc/pgx/v5 v5.10.0
 	github.com/nwaples/rardecode/v2 v2.2.5
 	github.com/ulikunitz/xz v0.5.15
-	golang.org/x/crypto v0.53.0
-	golang.org/x/text v0.38.0
+	golang.org/x/crypto v0.54.0
+	golang.org/x/text v0.40.0
 )
 
 require (
@@ -27,6 +27,6 @@ require (
 	github.com/spf13/afero v1.15.0 // indirect
 	github.com/stangelandcl/ppmd v0.1.1 // indirect
 	go4.org v0.0.0-20260112195520-a5071408f32f // indirect
-	golang.org/x/sync v0.21.0 // indirect
-	golang.org/x/sys v0.46.0 // indirect
+	golang.org/x/sync v0.22.0 // indirect
+	golang.org/x/sys v0.47.0 // indirect
 )
