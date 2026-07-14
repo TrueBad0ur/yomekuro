@@ -1,9 +1,11 @@
 package api
 
 import (
+	"archive/zip"
 	"encoding/json"
 	"fmt"
 	"io"
+	"mime/multipart"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -50,6 +52,11 @@ func isPDF(filename string) bool {
 	return strings.EqualFold(filepath.Ext(filename), ".pdf")
 }
 
+func isHTMLFile(filename string) bool {
+	ext := strings.ToLower(filepath.Ext(filename))
+	return ext == ".html" || ext == ".htm"
+}
+
 // Rejects path separators and leading dots, so the "<name>-in"/"<name>" folders
 // can't escape the library or look hidden.
 func sanitizeName(name string) (string, error) {
@@ -88,8 +95,16 @@ func (s *Server) uploadArchive(w http.ResponseWriter, r *http.Request) {
 	}
 	defer file.Close()
 
+	// A standalone HTML file is already-finished content — no OCR, no archive,
+	// no conversion_jobs row, just a straight copy into the library. fsnotify
+	// picks it up and scans it in like any manually dropped-in .html file.
+	if isHTMLFile(header.Filename) {
+		s.uploadHTMLFile(w, r, lib, file, header)
+		return
+	}
+
 	if !isSupportedArchive(header.Filename) && !isPDF(header.Filename) {
-		respondError(w, http.StatusBadRequest, "unsupported format (need .zip/.tar/.tar.gz/.tar.xz/.7z/.rar or .pdf)")
+		respondError(w, http.StatusBadRequest, "unsupported format (need .zip/.tar/.tar.gz/.tar.xz/.7z/.rar, .pdf, or .html)")
 		return
 	}
 
@@ -232,6 +247,42 @@ func (s *Server) uploadArchive(w http.ResponseWriter, r *http.Request) {
 	respond(w, map[string]string{"name": name, "status": "pending"})
 }
 
+// uploadHTMLFile copies a standalone HTML upload straight into the library
+// root — no staging, no conversion_jobs row, nothing to wait for. fsnotify's
+// existing watch on the library directory scans it in on its own, the same
+// path a manually-dropped-in .html file already takes.
+func (s *Server) uploadHTMLFile(w http.ResponseWriter, r *http.Request, lib db.Library, file multipart.File, header *multipart.FileHeader) {
+	name := r.FormValue("name")
+	if name == "" {
+		name = strings.TrimSuffix(header.Filename, filepath.Ext(header.Filename))
+	}
+	name, err := sanitizeName(name)
+	if err != nil {
+		respondError(w, http.StatusBadRequest, "invalid name")
+		return
+	}
+
+	destPath := filepath.Join(lib.Path, name+".html")
+	if _, err := os.Stat(destPath); err == nil {
+		respondError(w, http.StatusConflict, "a file with this name already exists in the library")
+		return
+	}
+
+	dst, err := os.Create(destPath)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, "cannot save upload: "+err.Error())
+		return
+	}
+	defer dst.Close()
+	if _, err := io.Copy(dst, file); err != nil {
+		respondError(w, http.StatusInternalServerError, "cannot save upload: "+err.Error())
+		return
+	}
+
+	w.WriteHeader(http.StatusCreated)
+	respond(w, map[string]string{"name": name, "status": "done"})
+}
+
 func containsSupportedContent(dir string) bool {
 	found := false
 	filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
@@ -325,15 +376,42 @@ func lastNumber(name string) (int, bool) {
 	return n, true
 }
 
-type reconvertCandidateDTO struct {
-	Name    string   `json:"name"`
-	Volumes []string `json:"volumes"`
+type reconvertVolumeDTO struct {
+	Name      string `json:"name"`
+	HasImages bool   `json:"has_images"`
 }
 
-// listReconvertable scans a library's own subfolders for "<name>"/"<name>-in"
-// pairs — the converter job's actual unit of work — rather than going through
+type reconvertCandidateDTO struct {
+	Name       string               `json:"name"`
+	Kind       string               `json:"kind"` // "epub" (folder of volumes) or "html" (one flat file)
+	Volumes    []reconvertVolumeDTO `json:"volumes"`
+	HasRawScan bool                 `json:"has_raw_scan"`
+}
+
+// epubHasImages reports whether a volume's EPUB has any page images at all —
+// false for a plain reflowable EPUB (ranobe/HTML: born-digital text, never had
+// page images to begin with), which is a different situation from a scanned
+// book whose raw source images are simply gone.
+func epubHasImages(path string) bool {
+	zr, err := zip.OpenReader(path)
+	if err != nil {
+		return false
+	}
+	defer zr.Close()
+	for _, f := range zr.File {
+		if strings.Contains(f.Name, "/images/") {
+			return true
+		}
+	}
+	return false
+}
+
+// listReconvertable scans a library's own subfolders for "<name>" output
+// folders — the converter job's actual unit of work — rather than going through
 // /api/series, whose grouping is driven by EPUB metadata and need not match the
-// on-disk folder name reconvert has to operate on.
+// on-disk folder name reconvert has to operate on. Every book with at least one
+// built volume is listed (so page images can always be pulled back out of its
+// EPUBs); HasRawScan additionally gates whether reconvert is actually possible.
 func (s *Server) listReconvertable(w http.ResponseWriter, r *http.Request) {
 	libID, ok := parseID(w, r.URL.Query().Get("library"))
 	if !ok {
@@ -356,17 +434,50 @@ func (s *Server) listReconvertable(w http.ResponseWriter, r *http.Request) {
 		if !e.IsDir() || strings.HasSuffix(e.Name(), "-in") {
 			continue
 		}
-		inDir := filepath.Join(lib.Path, e.Name()+"-in")
-		if info, err := os.Stat(inDir); err != nil || !info.IsDir() {
+		epubs, _ := filepath.Glob(filepath.Join(lib.Path, e.Name(), "*.epub"))
+		if len(epubs) == 0 {
 			continue
 		}
-		epubs, _ := filepath.Glob(filepath.Join(lib.Path, e.Name(), "*.epub"))
-		volumes := make([]string, len(epubs))
+		names := make([]string, len(epubs))
+		byName := make(map[string]string, len(epubs))
 		for i, ep := range epubs {
-			volumes[i] = strings.TrimSuffix(filepath.Base(ep), ".epub")
+			n := strings.TrimSuffix(filepath.Base(ep), ".epub")
+			names[i] = n
+			byName[n] = ep
 		}
-		sortVolumeNames(volumes)
-		items = append(items, reconvertCandidateDTO{Name: e.Name(), Volumes: volumes})
+		sortVolumeNames(names)
+		volumes := make([]reconvertVolumeDTO, len(names))
+		for i, n := range names {
+			volumes[i] = reconvertVolumeDTO{Name: n, HasImages: epubHasImages(byName[n])}
+		}
+		inDir := filepath.Join(lib.Path, e.Name()+"-in")
+		hasRawScan := false
+		if info, err := os.Stat(inDir); err == nil && info.IsDir() {
+			hasRawScan = true
+		}
+		items = append(items, reconvertCandidateDTO{Name: e.Name(), Kind: "epub", Volumes: volumes, HasRawScan: hasRawScan})
+	}
+
+	// HTML-library books are standalone ".html" files directly in the library
+	// root, not a "<name>/<volume>.epub" folder — never converted, never have a
+	// raw scan, and there's exactly one file per book, so no volume list at all.
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		lower := strings.ToLower(e.Name())
+		if !strings.HasSuffix(lower, ".html") && !strings.HasSuffix(lower, ".htm") {
+			continue
+		}
+		name := strings.TrimSuffix(e.Name(), filepath.Ext(e.Name()))
+		items = append(items, reconvertCandidateDTO{
+			Name: name,
+			Kind: "html",
+			Volumes: []reconvertVolumeDTO{
+				{Name: name, HasImages: false},
+			},
+			HasRawScan: false,
+		})
 	}
 	if items == nil {
 		items = []reconvertCandidateDTO{}
@@ -484,5 +595,206 @@ func (s *Server) deleteConversionJob(w http.ResponseWriter, r *http.Request) {
 	if inputPath != "" && !j.ForceOCR && j.Status != "done" {
 		os.RemoveAll(inputPath)
 	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// extractVolumeImages re-derives a raw page-image archive from an already-built
+// volume's EPUB — useful when the original "-in" scan is gone (deleted, or never
+// kept) but someone needs the page images back, e.g. to test the upload flow
+// without re-sourcing the original scan.
+func (s *Server) extractVolumeImages(w http.ResponseWriter, r *http.Request) {
+	libID, ok := parseID(w, r.URL.Query().Get("library"))
+	if !ok {
+		return
+	}
+	lib, err := db.GetLibraryByID(r.Context(), s.db, libID)
+	if err != nil {
+		respondError(w, http.StatusNotFound, "library not found")
+		return
+	}
+	name, err := sanitizeName(r.URL.Query().Get("name"))
+	if err != nil {
+		respondError(w, http.StatusBadRequest, "invalid name")
+		return
+	}
+	volume, err := sanitizeName(r.URL.Query().Get("volume"))
+	if err != nil {
+		respondError(w, http.StatusBadRequest, "invalid volume")
+		return
+	}
+	format := r.URL.Query().Get("format")
+	if format == "" {
+		format = "images"
+	}
+
+	// HTML-library book: a single standalone file directly in the library root,
+	// not a "<name>/<volume>.epub" folder — nothing to extract, just serve it.
+	if r.URL.Query().Get("kind") == "html" {
+		htmlPath := filepath.Join(lib.Path, name+".html")
+		if _, err := os.Stat(htmlPath); err != nil {
+			htmlPath = filepath.Join(lib.Path, name+".htm")
+		}
+		w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s.html"`, name))
+		w.Header().Set("Cache-Control", "no-store")
+		http.ServeFile(w, r, htmlPath)
+		return
+	}
+
+	epubPath := filepath.Join(lib.Path, name, volume+".epub")
+
+	// The original EPUB itself — no extraction needed, just serve the file.
+	if format == "epub" {
+		w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s.epub"`, volume))
+		w.Header().Set("Cache-Control", "no-store")
+		http.ServeFile(w, r, epubPath)
+		return
+	}
+
+	if format != "images" && format != "pdf" {
+		respondError(w, http.StatusBadRequest, "format must be images, pdf, or epub")
+		return
+	}
+
+	zr, err := zip.OpenReader(epubPath)
+	if err != nil {
+		respondError(w, http.StatusNotFound, "volume not found")
+		return
+	}
+	defer zr.Close()
+
+	var images []*zip.File
+	for _, f := range zr.File {
+		if strings.Contains(f.Name, "/images/") {
+			images = append(images, f)
+		}
+	}
+	if len(images) == 0 {
+		respondError(w, http.StatusNotFound, "no page images found in this volume")
+		return
+	}
+	// The zip's own central-directory order isn't guaranteed to be page order —
+	// sort by the number embedded in each filename (page-01.jpg, page-02.jpg, ...).
+	sort.Slice(images, func(i, j int) bool {
+		ni, oki := lastNumber(filepath.Base(images[i].Name))
+		nj, okj := lastNumber(filepath.Base(images[j].Name))
+		if oki && okj && ni != nj {
+			return ni < nj
+		}
+		if oki != okj {
+			return oki
+		}
+		return images[i].Name < images[j].Name
+	})
+
+	if format == "images" {
+		w.Header().Set("Content-Type", "application/zip")
+		w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s.zip"`, volume))
+		w.Header().Set("Cache-Control", "no-store")
+
+		zw := zip.NewWriter(w)
+		defer zw.Close()
+		for _, f := range images {
+			rc, err := f.Open()
+			if err != nil {
+				continue
+			}
+			out, err := zw.Create(filepath.Base(f.Name))
+			if err == nil {
+				io.Copy(out, rc)
+			}
+			rc.Close()
+		}
+		return
+	}
+
+	// format == "pdf"
+	pages := make([]pdfPage, 0, len(images))
+	for _, f := range images {
+		rc, err := f.Open()
+		if err != nil {
+			continue
+		}
+		data, err := io.ReadAll(rc)
+		rc.Close()
+		if err != nil {
+			continue
+		}
+		jpegData, w2, h2, err := imageToJPEG(data)
+		if err != nil {
+			continue
+		}
+		pages = append(pages, pdfPage{jpegData: jpegData, width: w2, height: h2})
+	}
+	if len(pages) == 0 {
+		respondError(w, http.StatusInternalServerError, "could not decode any page image")
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/pdf")
+	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s.pdf"`, volume))
+	w.Header().Set("Cache-Control", "no-store")
+	w.Write(buildImagesPDF(pages))
+}
+
+// deleteBook removes a book from the library entirely: its output folder (all
+// volumes' EPUBs) and, if present, its raw-scan "<name>-in" folder — a
+// permanent, disk-level delete, not just a DB row removal. Refuses while a
+// conversion job is queued or running for this name, since deleting files out
+// from under a live mokuro process would corrupt or crash it.
+func (s *Server) deleteBook(w http.ResponseWriter, r *http.Request) {
+	libID, ok := parseID(w, r.URL.Query().Get("library"))
+	if !ok {
+		return
+	}
+	lib, err := db.GetLibraryByID(r.Context(), s.db, libID)
+	if err != nil {
+		respondError(w, http.StatusNotFound, "library not found")
+		return
+	}
+	name, err := sanitizeName(r.URL.Query().Get("name"))
+	if err != nil {
+		respondError(w, http.StatusBadRequest, "invalid name")
+		return
+	}
+
+	// HTML-library book: a single standalone file, nothing else to clean up.
+	if r.URL.Query().Get("kind") == "html" {
+		htmlPath := filepath.Join(lib.Path, name+".html")
+		if _, err := os.Stat(htmlPath); err != nil {
+			htmlPath = filepath.Join(lib.Path, name+".htm")
+		}
+		db.DeleteBookByPath(r.Context(), s.db, htmlPath)
+		if err := os.Remove(htmlPath); err != nil && !os.IsNotExist(err) {
+			respondError(w, http.StatusInternalServerError, "failed to delete file: "+err.Error())
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+
+	taken, err := db.ConversionJobNameTaken(r.Context(), s.db, libID, name)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if taken {
+		respondError(w, http.StatusConflict, "a conversion job is queued or running for this book — stop/remove it first")
+		return
+	}
+
+	outDir := filepath.Join(lib.Path, name)
+	inDir := filepath.Join(lib.Path, name+"-in")
+
+	epubs, _ := filepath.Glob(filepath.Join(outDir, "*.epub"))
+	for _, ep := range epubs {
+		db.DeleteBookByPath(r.Context(), s.db, ep)
+	}
+
+	if err := os.RemoveAll(outDir); err != nil {
+		respondError(w, http.StatusInternalServerError, "failed to delete book folder: "+err.Error())
+		return
+	}
+	os.RemoveAll(inDir)
+
 	w.WriteHeader(http.StatusNoContent)
 }

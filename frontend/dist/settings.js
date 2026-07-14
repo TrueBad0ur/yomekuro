@@ -417,21 +417,50 @@ async function loadBooksList() {
   }
   const items = data.items || [];
   if (items.length === 0) {
-    list.innerHTML = '<p style="color:var(--text-dim);font-size:.88rem">No reconvertible books in this library (only books converted from a raw scan, with the scan still on disk, are eligible).</p>';
+    list.innerHTML = '<p style="color:var(--text-dim);font-size:.88rem">No books in this library.</p>';
     return;
   }
   list.innerHTML = items.map(s => {
+    if (s.kind === 'html') {
+      // A standalone HTML file: one book, one file, one obvious format — no
+      // picker, no reconvert (never went through this app's conversion at all).
+      return `
+      <div class="library-card">
+        <div class="library-card-name">${esc(s.name)}</div>
+        <div class="library-card-footer">
+          <span class="library-card-count">HTML file</span>
+          <button class="reconvert-btn dl-btn" data-name="${esc(s.name)}" data-volume="${esc(s.name)}" data-kind="html" data-format="html">Download HTML</button>
+          <button class="job-delete-btn book-delete-btn" data-name="${esc(s.name)}" data-kind="html">Delete</button>
+        </div>
+      </div>`;
+    }
+
     const volumeRows = s.volumes.map(v => `
       <div class="reconvert-volume-row">
-        <span class="reconvert-volume-name">${esc(v)}</span>
-        <button class="reconvert-btn" data-name="${esc(s.name)}" data-volume="${esc(v)}">Reconvert (full OCR)</button>
+        <span class="reconvert-volume-name">${esc(v.name)}</span>
+        <div class="reconvert-volume-actions">
+          ${v.has_images ? `
+            <select class="dl-format-picker" aria-label="Download format">
+              <option value="images">Images (.zip)</option>
+              <option value="pdf">PDF</option>
+              <option value="epub">EPUB</option>
+            </select>
+            <button class="reconvert-btn dl-btn" data-name="${esc(s.name)}" data-volume="${esc(v.name)}">Download</button>
+          ` : `
+            <button class="reconvert-btn dl-btn" data-name="${esc(s.name)}" data-volume="${esc(v.name)}" data-format="epub">Download EPUB</button>
+          `}
+          ${s.has_raw_scan ? `<button class="reconvert-btn" data-name="${esc(s.name)}" data-volume="${esc(v.name)}">Reconvert (full OCR)</button>` : ''}
+        </div>
       </div>`).join('');
     return `
     <div class="library-card">
       <div class="library-card-name">${esc(s.name)}</div>
       <div class="library-card-footer">
         <span class="library-card-count">${s.volumes.length} volume${s.volumes.length === 1 ? '' : 's'}</span>
-        <button class="reconvert-btn" data-name="${esc(s.name)}">Reconvert all (full OCR)</button>
+        ${s.has_raw_scan
+          ? `<button class="reconvert-btn" data-name="${esc(s.name)}">Reconvert all (full OCR)</button>`
+          : `<span class="reconvert-no-scan" title="Raw scan no longer on disk — reconvert needs a fresh upload">no raw scan</span>`}
+        <button class="job-delete-btn book-delete-btn" data-name="${esc(s.name)}">Delete</button>
       </div>
       <p class="reconvert-error" style="color:#e07070;font-size:.78rem;margin:.35rem 0 0" hidden></p>
       ${volumeRows ? `<div class="reconvert-volumes">${volumeRows}</div>` : ''}
@@ -440,7 +469,52 @@ async function loadBooksList() {
 }
 
 document.getElementById('books-list').addEventListener('click', async (e) => {
-  const btn = e.target.closest('.reconvert-btn');
+  const dlBtn = e.target.closest('.dl-btn');
+  if (dlBtn) {
+    // A fixed data-format (HTML file, or a no-images EPUB-only row) skips the
+    // picker entirely; otherwise read the format the user picked next to it.
+    let format = dlBtn.dataset.format;
+    if (!format) {
+      const row = dlBtn.closest('.reconvert-volume-row');
+      format = row.querySelector('.dl-format-picker').value;
+    }
+    let url = `/api/converter/extract-images?library=${encodeURIComponent(selectedBooksLibraryId)}` +
+      `&name=${encodeURIComponent(dlBtn.dataset.name)}&volume=${encodeURIComponent(dlBtn.dataset.volume)}` +
+      `&format=${encodeURIComponent(format)}`;
+    if (dlBtn.dataset.kind) url += `&kind=${encodeURIComponent(dlBtn.dataset.kind)}`;
+    window.location.href = url;
+    return;
+  }
+
+  const delBtn = e.target.closest('.book-delete-btn');
+  if (delBtn) {
+    const name = delBtn.dataset.name;
+    if (!confirm(`Permanently delete "${name}"? This removes the EPUB(s) and the raw scan from disk — cannot be undone.`)) {
+      return;
+    }
+    delBtn.disabled = true;
+    delBtn.textContent = 'Deleting…';
+    let url = `/api/converter/books?library=${encodeURIComponent(selectedBooksLibraryId)}&name=${encodeURIComponent(name)}`;
+    if (delBtn.dataset.kind) url += `&kind=${encodeURIComponent(delBtn.dataset.kind)}`;
+    try {
+      const res = await fetch(url, { method: 'DELETE' });
+      if (!res.ok) {
+        const d = await res.json().catch(() => ({}));
+        alert(d.error || 'Failed to delete');
+        delBtn.disabled = false;
+        delBtn.textContent = 'Delete';
+        return;
+      }
+      loadBooksList();
+    } catch {
+      alert('Failed to delete');
+      delBtn.disabled = false;
+      delBtn.textContent = 'Delete';
+    }
+    return;
+  }
+
+  const btn = e.target.closest('button.reconvert-btn:not(.dl-btn)');
   if (!btn) return;
   const card = btn.closest('.library-card');
   const errEl = card.querySelector('.reconvert-error');

@@ -80,6 +80,8 @@ func NewRouter(pool *pgxpool.Pool, sc *scanner.Scanner, w *scanner.Watcher, data
 			r.Post("/api/converter/upload", s.uploadArchive)
 			r.Get("/api/converter/reconvertable", s.listReconvertable)
 			r.Post("/api/converter/reconvert", s.reconvertSeries)
+			r.Get("/api/converter/extract-images", s.extractVolumeImages)
+			r.Delete("/api/converter/books", s.deleteBook)
 			r.Get("/api/converter/jobs", s.listConversionJobs)
 			r.Delete("/api/converter/jobs/{id}", s.deleteConversionJob)
 

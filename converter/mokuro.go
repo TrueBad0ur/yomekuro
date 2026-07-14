@@ -126,8 +126,10 @@ func runMokuro(ctx context.Context, inputDir string, volumeDirs []string, noCach
 	}
 
 	// -u: Python fully-buffers stdout once it's not a TTY, which would hide
-	// tqdm's progress until the buffer fills or the process exits.
-	args := []string{"-u", "-m", "mokuro", "--disable_confirmation", "--legacy_html=False"}
+	// tqdm's progress until the buffer fills or the process exits. mokuro_run.py
+	// (not "-m mokuro" directly) applies our higher-quality detector settings —
+	// see its own comment for why.
+	args := []string{"-u", "/mokuro_run.py", "--disable_confirmation", "--legacy_html=False"}
 	if noCache && len(volumeDirs) == 0 {
 		// global no-cache only when no specific volume selected
 		args = append(args, "--no_cache")

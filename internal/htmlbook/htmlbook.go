@@ -17,15 +17,45 @@ type Book struct {
 	Authors          []string
 	Language         string
 	ReadingDirection string // "ltr" | "rtl"
+	Excerpt          string // plain text, tag-stripped, for the generated cover thumbnail
 }
 
 var (
-	headRe     = regexp.MustCompile(`(?is)<head[^>]*>(.*?)</head>`)
-	titleRe    = regexp.MustCompile(`(?is)<title[^>]*>(.*?)</title>`)
-	htmlLangRe = regexp.MustCompile(`(?is)<html[^>]*\blang=["']([^"']+)["']`)
-	metaRe     = regexp.MustCompile(`(?is)<meta\b([^>]*)>`)
-	attrRe     = regexp.MustCompile(`(?is)([a-zA-Z0-9_-]+)\s*=\s*"([^"]*)"|([a-zA-Z0-9_-]+)\s*=\s*'([^']*)'`)
+	headRe        = regexp.MustCompile(`(?is)<head[^>]*>(.*?)</head>`)
+	bodyRe        = regexp.MustCompile(`(?is)<body[^>]*>(.*?)</body>`)
+	titleRe       = regexp.MustCompile(`(?is)<title[^>]*>(.*?)</title>`)
+	htmlLangRe    = regexp.MustCompile(`(?is)<html[^>]*\blang=["']([^"']+)["']`)
+	metaRe        = regexp.MustCompile(`(?is)<meta\b([^>]*)>`)
+	attrRe        = regexp.MustCompile(`(?is)([a-zA-Z0-9_-]+)\s*=\s*"([^"]*)"|([a-zA-Z0-9_-]+)\s*=\s*'([^']*)'`)
+	scriptStyleRe = regexp.MustCompile(`(?is)<(?:script|style)[^>]*>.*?</(?:script|style)>`)
+	tagRe         = regexp.MustCompile(`(?s)<[^>]+>`)
+	wsRe          = regexp.MustCompile(`\s+`)
 )
+
+// excerptRunes caps how much plain text goes into the generated cover
+// thumbnail — plenty for a handful of wrapped preview lines, cheap to store.
+const excerptRunes = 400
+
+// extractExcerpt strips tags/scripts/styles from the body and collapses
+// whitespace, for the text-card cover — deliberately regex-based, not a real
+// HTML parser, same rationale as the rest of this package: a dropped-in file
+// isn't guaranteed to be well-formed XHTML.
+func extractExcerpt(content string) string {
+	body := content
+	if m := bodyRe.FindStringSubmatch(content); m != nil {
+		body = m[1]
+	}
+	body = scriptStyleRe.ReplaceAllString(body, " ")
+	body = tagRe.ReplaceAllString(body, " ")
+	body = html.UnescapeString(body)
+	body = strings.TrimSpace(wsRe.ReplaceAllString(body, " "))
+
+	r := []rune(body)
+	if len(r) > excerptRunes {
+		r = r[:excerptRunes]
+	}
+	return string(r)
+}
 
 // Open reads path and extracts title/author/reading-direction/language
 // from the <head>. Falls back to the filename when no <title> is present.
@@ -83,6 +113,7 @@ func Open(path string) (*Book, error) {
 		Authors:          authors,
 		Language:         language,
 		ReadingDirection: direction,
+		Excerpt:          extractExcerpt(content),
 	}, nil
 }
 

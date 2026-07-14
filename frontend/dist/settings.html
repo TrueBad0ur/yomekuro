@@ -49,7 +49,8 @@
           A .zip/.tar/.tar.gz/.tar.xz/.7z/.rar of raw page images (one subfolder per volume,
           or images directly for a single volume), or a .pdf. Text-layer PDFs convert
           straight to EPUB with no OCR; scanned PDFs and archives are queued for GPU OCR.
-          The resulting EPUBs appear in the library once done.
+          The resulting EPUBs appear in the library once done. A standalone .html file is
+          copied straight into the library as-is — no OCR, no queue, appears within seconds.
         </p>
 
         <div class="upload-field">
@@ -73,7 +74,7 @@
         </div>
 
         <label id="upload-dropzone" class="upload-dropzone" for="upload-file">
-          <input id="upload-file" type="file" accept=".zip,.tar,.tar.gz,.tgz,.tar.xz,.txz,.7z,.rar,.pdf" multiple hidden>
+          <input id="upload-file" type="file" accept=".zip,.tar,.tar.gz,.tgz,.tar.xz,.txz,.7z,.rar,.pdf,.html,.htm" multiple hidden>
           <span class="upload-dropzone-icon">&#8593;</span>
           <span class="upload-dropzone-text">
             <span class="upload-dropzone-title">Drop files here, or click to browse</span>
@@ -98,9 +99,10 @@
         <p class="upload-hint">
           Reconvert a book — or just one of its volumes — with a full OCR re-run, useful after a
           converter/mokuro update. This redoes OCR from the original raw scan (not a rebuild from
-          cached results), so it takes as long as the first conversion did. Only books converted
-          from a raw scan (not a plain EPUB upload) can be reconverted, and only while their
-          staged raw scan is still on disk.
+          cached results), so it takes as long as the first conversion did. Reconvert only works
+          while the book's original raw scan is still staged on disk ("no raw scan" otherwise) —
+          "Download images" always works instead, pulling the page images back out of the
+          already-built EPUB, e.g. to test the upload flow without re-sourcing the original scan.
         </p>
         <div class="upload-field">
           <span class="upload-field-label">Library</span>

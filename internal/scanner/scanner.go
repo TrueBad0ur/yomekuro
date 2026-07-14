@@ -16,6 +16,7 @@ import (
 	"github.com/truebad0ur/yomekuro/internal/db"
 	"github.com/truebad0ur/yomekuro/internal/epub"
 	"github.com/truebad0ur/yomekuro/internal/htmlbook"
+	"github.com/truebad0ur/yomekuro/internal/thumbnail"
 )
 
 type Scanner struct {
@@ -118,6 +119,11 @@ func (s *Scanner) processFile(ctx context.Context, lib db.Library, filePath stri
 		if err != nil {
 			return false, fmt.Errorf("parse html: %w", err)
 		}
+
+		// HTML never carries an embedded cover like EPUB does — generate a
+		// text-card thumbnail from the title/excerpt instead.
+		coverPath, coverMT := s.saveCover(bookID, thumbnail.Render(book.Title, book.Excerpt), "image/png")
+
 		rec = db.Book{
 			ID:               bookID,
 			LibraryID:        lib.ID,
@@ -133,6 +139,8 @@ func (s *Scanner) processFile(ctx context.Context, lib db.Library, filePath stri
 			SeriesName:       strings.TrimSuffix(filepath.Base(filePath), filepath.Ext(filePath)),
 			PageCount:        1,
 			ReadingDirection: book.ReadingDirection,
+			CoverPath:        coverPath,
+			CoverMediaType:   coverMT,
 			Format:           "html",
 		}
 	} else {

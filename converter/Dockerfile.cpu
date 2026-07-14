@@ -34,5 +34,6 @@ RUN pip install --no-cache-dir /mokuro sentencepiece "transformers==5.12.1" && \
     cp -r /mokuro/mokuro/assets \
       "$(python3 -c 'import importlib.util,pathlib; print(pathlib.Path(importlib.util.find_spec("mokuro").origin).parent)')"
 
+COPY mokuro_run.py /mokuro_run.py
 COPY --from=builder /converter /converter
 ENTRYPOINT ["/converter"]

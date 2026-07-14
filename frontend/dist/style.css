@@ -833,7 +833,24 @@ body.page-settings { max-width: 1080px; margin: 0 auto; padding: 0 1.5rem 3rem; 
   vertical-align: middle;
 }
 
-.reconvert-btn { padding: 0.35rem 0.9rem; font-size: 0.82rem; }
+.reconvert-btn {
+  padding: 0.35rem 0.9rem;
+  font-size: 0.82rem;
+  /* also used on <a> tags (image download link) — repeat button's own chrome
+     since anchors don't get the bare `button` element rule. */
+  display: inline-block;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+  text-decoration: none;
+  transition: border-color 0.15s, color 0.15s;
+  white-space: nowrap;
+}
+.reconvert-btn:hover { border-color: var(--accent); color: var(--accent); }
+
+.reconvert-no-scan { font-size: 0.78rem; color: var(--text-dim); font-style: italic; }
 
 .reconvert-volumes {
   margin-top: 0.6rem;
@@ -855,6 +872,15 @@ body.page-settings { max-width: 1080px; margin: 0 auto; padding: 0 1.5rem 3rem; 
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.reconvert-volume-actions { display: flex; gap: 0.4rem; flex-shrink: 0; align-items: center; }
+.dl-format-picker {
+  padding: 0.3rem 0.5rem;
+  font-size: 0.78rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--text);
 }
 
 .upload-hint { color: var(--text-dim); font-size: 0.82rem; margin: 0 0 1.1rem; }
