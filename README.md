@@ -77,6 +77,13 @@ Yomitan works directly against the OCR text overlay on manga pages — no
 iframe getting in the way. See [Reader](#reader) below for keyboard
 shortcuts.
 
+On a phone, swipe or tap the left/right edge of the screen to turn manga
+pages — text selection (for bookmarking) only kicks in on a genuine
+long-press, so a plain tap or swipe never leaves a stray highlight behind. A
+page photographed as one fused two-page spread (rather than a photo per
+physical page) shows one half at a time by default; press **Spread** to see
+the whole original image instead.
+
 ![Reader](docs/screenshots/reader.png)
 
 ### Bookmarks
@@ -95,11 +102,14 @@ uploading manga for OCR conversion.
 
 ![Settings page](docs/screenshots/settings.png)
 
-### Uploading manga for OCR (admin only)
+### Uploading (admin only)
 
-Settings → Upload manga: pick a library, drop one or more archives of raw page
-images and/or PDFs onto the upload area, and a name. **Several files can be
-selected at once** — each becomes its own conversion job and they queue up.
+Settings → Uploading: pick a library, drop one or more archives of raw page
+images, PDFs, and/or standalone `.html` files onto the upload area, and a
+name. **Several files can be selected at once** — each archive/PDF becomes
+its own conversion job and they queue up; an `.html` file needs no
+conversion at all, it's just copied straight into the library and shows up
+within seconds.
 
 Tick **"Add to an existing book"** to drop extra volumes into a book already in
 the library instead of creating a new one; several volumes may be queued for the
@@ -109,6 +119,25 @@ Jobs are listed live on the same page with their current volume, and can be
 stopped (or removed once finished).
 
 ![Upload/conversion log](docs/screenshots/conversion-log.png)
+
+### Converting (admin only)
+
+Settings → Converting lists every book already in a library, per volume:
+
+- **Reconvert (full OCR)** — re-runs OCR from scratch (not a cache-reuse
+  rebuild) for one volume or the whole book, so it picks up any
+  converter/mokuro quality improvement. Only available while the book's
+  original raw scan (`<name>-in/`) is still on disk — shows "no raw scan"
+  otherwise.
+- **Download** — pulls a volume back out as a page-**Images** `.zip`, a
+  **PDF**, or the raw **EPUB**, straight from the already-built file, no
+  raw scan required. Handy for testing the upload flow again without
+  re-sourcing the original scan. A ranobe/plain-EPUB volume (no page images
+  at all) only offers an EPUB download; a standalone HTML-library book
+  offers an HTML download.
+- **Delete** — permanently removes a book: its EPUB(s) *and* its raw scan
+  folder, if any. Confirmed via a browser dialog first, and blocked while a
+  conversion job is queued or running against it. No undo.
 
 ---
 
@@ -245,12 +274,15 @@ one-shot CLI), `converter-gpu` (AMD ROCm, one-shot CLI), and `converter-worker`
 
 ### Upload via UI (recommended)
 
-Settings → Upload manga: pick a library, a file, and a name. The file is
+Settings → Uploading: pick a library, a file, and a name. The file is
 either an archive (`.zip`/`.tar`/`.tar.gz`/`.tar.xz`/`.7z`/`.rar`) of raw page
 images, or a `.pdf`. yomekuro stages it into `<library>/<name>-in/`
 (extracting archives and stripping OS junk — `.DS_Store`, `__MACOSX/`, `._*`
 — along the way), and queues a row in Postgres (`conversion_jobs` table).
 `converter-worker` picks it up and, per volume:
+
+(A standalone `.html` file skips all of this — no OCR, no queue, it's just
+copied straight into the library.)
 
 - **Image pages / scanned PDF** (no text layer): runs mokuro OCR on GPU.
 - **PDF with a real text layer**: skips OCR entirely — pulls the text and its
@@ -318,6 +350,15 @@ docker compose -f converter/docker-compose.yml run --rm converter \
 
 Model weights download on first run, cached in `converter/data/`.
 
+### OCR quality vs. speed
+
+The text detector runs at double mokuro's own default resolution, trading
+roughly 2-3x more time per page for meaningfully fewer misreads — a small
+numbered-list marker or dense footer text is much less likely to get merged
+into a neighboring line's OCR pass. Applies to every future conversion;
+already-converted books are unaffected until reconverted (Settings →
+Converting → Reconvert).
+
 ### AMD GPU (ROCm)
 
 PyTorch's ROCm wheel bundles its own runtime libs — no ROCm apt packages needed
@@ -338,6 +379,7 @@ generation) works in practice. Don't override across RDNA generations.
 - Fixed-layout manga: page-by-page, RTL support, Yomitan works on OCR text without iframe
 - Novels: scrolling or vertical (RTL) layout
 - Keyboard: `←` / `→` — prev/next page; `↑` / `↓` — scroll within zoomed page; `Ctrl +` / `Ctrl -` / `Ctrl 0` — zoom in/out/reset
+- Touch: swipe or tap the left/right edge to turn manga pages; long-press selects text for a bookmark, a bare tap never does
 - Spread view: toggle **Spread** button in the nav bar
 
 ### Text lookup (Yomitan / 10ten)
@@ -384,7 +426,10 @@ into whichever library you pick, including `library/pdf/`).
 
 HTML book titles come from `<title>`, with optional
 `<meta name="author" content="...">` and
-`<meta name="reading-direction" content="rtl">` in the `<head>`.
+`<meta name="reading-direction" content="rtl">` in the `<head>`. Since a
+standalone HTML file has no embedded cover the way EPUB does, its
+library-page thumbnail is generated automatically — title plus a short
+excerpt of the body text on a plain card.
 
 ---
 

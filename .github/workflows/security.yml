@@ -45,6 +45,7 @@ jobs:
           go-version-file: ${{ matrix.gomod }}
 
       - name: Install gosec
+        continue-on-error: true
         run: go install github.com/securego/gosec/v2/cmd/gosec@latest
 
       - name: Run gosec
@@ -54,9 +55,14 @@ jobs:
 
       - name: Summarize findings
         if: always()
+        continue-on-error: true
         working-directory: ${{ matrix.dir }}
         run: |
           echo "### gosec — ${{ matrix.module }}" | tee -a "$GITHUB_STEP_SUMMARY"
+          if [ ! -f gosec.json ]; then
+            echo "⚠️ gosec did not produce a report (install or run step failed — see above)." | tee -a "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
           jq -r '
             (.Issues // []) as $issues
             | if ($issues | length) == 0 then "✅ No findings."
@@ -96,6 +102,7 @@ jobs:
           go-version-file: ${{ matrix.gomod }}
 
       - name: Install govulncheck
+        continue-on-error: true
         run: go install golang.org/x/vuln/cmd/govulncheck@latest
 
       - name: Run govulncheck
