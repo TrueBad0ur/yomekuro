@@ -217,7 +217,8 @@ func (s *Server) getBookContent(w http.ResponseWriter, r *http.Request) {
 	if b.Format == "html" {
 		w.Header().Set("Content-Type", mimeByExt(entryPath))
 		w.Header().Set("ETag", etag)
-		w.Header().Set("Cache-Control", "no-cache")
+		// private: same reasoning as below — never let a shared proxy cache this.
+		w.Header().Set("Cache-Control", "private, no-cache")
 		http.ServeFile(w, r, b.Path)
 		return
 	}
@@ -251,8 +252,11 @@ func (s *Server) getBookContent(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", mimeByExt(entryPath))
 	w.Header().Set("ETag", etag)
 	// no-cache = always revalidate via ETag. Content can change on re-convert;
-	// the hash-based ETag makes revalidation cheap (304) while never serving stale pages.
-	w.Header().Set("Cache-Control", "no-cache")
+	// the hash-based ETag makes revalidation cheap (304) while never serving stale
+	// pages. private: this is a specific user's book content — a shared proxy/CDN
+	// must never cache and replay it to a different (possibly unauthenticated)
+	// requester behind the same cache.
+	w.Header().Set("Cache-Control", "private, no-cache")
 	io.Copy(w, rc)
 }
 

@@ -138,7 +138,10 @@ func (s *Server) getBookCover(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("ETag", etag)
-	w.Header().Set("Cache-Control", "max-age=86400")
+	// private: safe to cache in the requester's own browser (the ETag makes
+	// revalidation cheap), but a shared proxy/CDN in front of this server must
+	// never cache and replay it to a different, possibly unauthenticated, request.
+	w.Header().Set("Cache-Control", "private, max-age=86400")
 	if b.CoverMediaType != "" {
 		w.Header().Set("Content-Type", b.CoverMediaType)
 	}
