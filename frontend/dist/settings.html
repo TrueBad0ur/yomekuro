@@ -23,8 +23,8 @@
   <div class="settings-layout">
     <nav class="settings-nav">
       <a href="#libraries" class="settings-nav-link active">Libraries</a>
-      <a href="#upload" class="settings-nav-link">Uploading</a>
-      <a href="#books" class="settings-nav-link">Converting</a>
+      <a href="#upload" class="settings-nav-link">Upload &amp; Jobs</a>
+      <a href="#books" class="settings-nav-link">Manage Books</a>
       <a href="#users-section" class="settings-nav-link">Users</a>
     </nav>
 
@@ -44,13 +44,16 @@
       </section>
 
       <section class="settings-section" id="upload">
-        <h2 class="settings-section-title">Uploading</h2>
+        <h2 class="settings-section-title">Upload &amp; Jobs</h2>
         <p class="upload-hint">
           A .zip/.tar/.tar.gz/.tar.xz/.7z/.rar of raw page images (one subfolder per volume,
           or images directly for a single volume), or a .pdf. Text-layer PDFs convert
           straight to EPUB with no OCR; scanned PDFs and archives are queued for GPU OCR.
           The resulting EPUBs appear in the library once done. A standalone .html file is
           copied straight into the library as-is — no OCR, no queue, appears within seconds.
+          A .epub is inspected automatically: if it already has real, selectable text it's
+          added as-is, no OCR; if it's just page images with no text layer, its pages are
+          queued for GPU OCR like any other scan.
         </p>
 
         <div class="upload-field">
@@ -74,7 +77,7 @@
         </div>
 
         <label id="upload-dropzone" class="upload-dropzone" for="upload-file">
-          <input id="upload-file" type="file" accept=".zip,.tar,.tar.gz,.tgz,.tar.xz,.txz,.7z,.rar,.pdf,.html,.htm" multiple hidden>
+          <input id="upload-file" type="file" accept=".zip,.tar,.tar.gz,.tgz,.tar.xz,.txz,.7z,.rar,.pdf,.epub,.html,.htm" multiple hidden>
           <span class="upload-dropzone-icon">&#8593;</span>
           <span class="upload-dropzone-text">
             <span class="upload-dropzone-title">Drop files here, or click to browse</span>
@@ -95,7 +98,7 @@
       </section>
 
       <section class="settings-section" id="books">
-        <h2 class="settings-section-title">Converting</h2>
+        <h2 class="settings-section-title">Manage Books</h2>
         <p class="upload-hint">
           Reconvert a book — or just one of its volumes — with a full OCR re-run, useful after a
           converter/mokuro update. This redoes OCR from the original raw scan (not a rebuild from
@@ -103,10 +106,17 @@
           while the book's original raw scan is still staged on disk ("no raw scan" otherwise) —
           "Download images" always works instead, pulling the page images back out of the
           already-built EPUB, e.g. to test the upload flow without re-sourcing the original scan.
+          Each book is collapsed to one row by default — click its name to see individual
+          volumes — and shows when it was last analyzed; use the search box to filter a large
+          library by name.
         </p>
         <div class="upload-field">
           <span class="upload-field-label">Library</span>
           <div id="books-library-picker" class="library-picker"></div>
+        </div>
+        <div class="upload-field">
+          <span class="upload-field-label">Search</span>
+          <input id="books-search" type="text" placeholder="Filter by name…" class="user-input" style="width:100%">
         </div>
         <div id="books-list" class="settings-libraries" style="margin-top:.75rem"></div>
       </section>

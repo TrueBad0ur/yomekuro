@@ -1,4 +1,5 @@
 import functools
+import os
 
 import fire
 
@@ -12,8 +13,14 @@ from mokuro.mokuro_generator import MokuroGenerator
 # and the real text as one garbled string. Bumping both trades OCR time for
 # quality, which is the point here — same CLI surface as `python -m mokuro`,
 # just a different MokuroGenerator default injected via monkeypatch.
+#
+# detector_input_size is read from an env var (set by converter/mokuro.go, per
+# job) rather than fixed, so a reconvert can opt into a higher value from the
+# Settings UI for dense scans that still merge lines at the standard size,
+# without slowing down every ordinary conversion.
+detector_input_size = int(os.environ.get("MOKURO_DETECTOR_INPUT_SIZE", "2048"))
 mokuro_run.MokuroGenerator = functools.partial(
-    MokuroGenerator, detector_input_size=2048, text_height=96
+    MokuroGenerator, detector_input_size=detector_input_size, text_height=96
 )
 
 if __name__ == "__main__":

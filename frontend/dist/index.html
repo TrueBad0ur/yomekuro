@@ -15,30 +15,9 @@
 </head>
 <body class="page-library">
 
-  <aside class="sidebar" id="sidebar">
-    <div class="sidebar-header">
-      <a class="logo" id="logo-home">よめくろ</a>
-      <button class="sidebar-close" id="sidebar-close" aria-label="Close">✕</button>
-    </div>
-
-    <nav class="sidebar-nav">
-      <button class="nav-item active" id="nav-all-titles">All Titles</button>
-      <div class="nav-section-label">Libraries</div>
-      <div class="library-groups" id="library-groups">
-        <span class="nav-loading">Loading…</span>
-      </div>
-    </nav>
-
-    <div class="sidebar-footer">
-      <a class="footer-btn footer-link" href="/settings">Settings</a>
-    </div>
-  </aside>
-
-  <div class="sidebar-overlay" id="sidebar-overlay"></div>
-
   <div class="main-wrap">
     <header class="main-header">
-      <button class="hamburger" id="hamburger" aria-label="Open sidebar">☰</button>
+      <a class="logo" id="logo-home">よめくろ</a>
       <nav class="breadcrumb" id="breadcrumb" hidden>
         <button id="btn-back" class="breadcrumb-back">Library</button>
         <span class="breadcrumb-sep">/</span>
@@ -48,8 +27,16 @@
         <button class="theme-opt" data-theme="dark"  id="btn-dark">Dark</button>
         <button class="theme-opt" data-theme="light" id="btn-light">Light</button>
       </div>
+      <a class="footer-link header-settings-link" id="settings-link" href="/settings">Settings</a>
       <button id="btn-logout" class="logout-btn header-logout-btn">Logout</button>
     </header>
+
+    <div class="library-tabs">
+      <button class="nav-item active" id="nav-all-titles">All Titles</button>
+      <div class="library-groups" id="library-groups">
+        <span class="nav-loading">Loading…</span>
+      </div>
+    </div>
 
     <div class="filter-bar">
       <div class="search-row">

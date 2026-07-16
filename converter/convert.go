@@ -32,9 +32,16 @@ func acquireGPU(ctx context.Context) error {
 
 func releaseGPU() { <-gpuSem }
 
+// DefaultDetectorSize is the text-detector's input resolution used unless a
+// job (or the CLI) asks for something else. 3072 (not mokuro's own 1024, nor
+// this app's earlier 2048 default) is the confirmed-real-improvement setting
+// from testing on real production scans — see CLAUDE.md's OCR-quality notes —
+// 2048 remains available as a faster/lower-VRAM opt-out, not the default.
+const DefaultDetectorSize = 3072
+
 // Convert OCRs input (volume subdirs, or one flat image folder) into one EPUB
 // per volume. Cancelling ctx kills mokuro; volumes already built are kept.
-func Convert(ctx context.Context, input, output, volume string, noCache bool, onVolume func(string)) (ok, fail int, err error) {
+func Convert(ctx context.Context, input, output, volume string, noCache bool, detectorSize int, onVolume func(string)) (ok, fail int, err error) {
 	if err := os.MkdirAll(output, 0755); err != nil {
 		return 0, 0, fmt.Errorf("create output dir: %w", err)
 	}
@@ -117,24 +124,21 @@ func Convert(ctx context.Context, input, output, volume string, noCache bool, on
 	}
 	defer releaseGPU()
 
-	mokuroErrCh := make(chan error, 1)
-	go func() { mokuroErrCh <- runMokuro(ctx, mokuroDir, volumeDirs, noCache, onVolume) }()
+	// A reconvert's ".mokuro" files from the *previous* run are already sitting on
+	// disk when this starts — snapshot their mtimes first so the poll loop can tell
+	// "mokuro actually rewrote this volume" from "this is stale leftover content
+	// nothing has touched yet". Without this, the very first poll tick (2s in, long
+	// before mokuro finishes reprocessing even one volume) would see every old file
+	// as "new" and build every volume's EPUB from stale, pre-reconvert OCR data —
+	// then never rebuild it again once mokuro *does* rewrite that file later in the
+	// same run, because the old name-only "built" tracking had already marked it done.
+	builtMTime := snapshotMokuroMTimes(mokuroDir)
 
-	// Re-running one volume leaves the others' ".mokuro" files in place; pre-mark
-	// them built so the poll loop only picks up the targeted one.
-	built := map[string]bool{}
-	if volume != "" {
-		if entries, err := os.ReadDir(mokuroDir); err == nil {
-			target := volume + ".mokuro"
-			for _, e := range entries {
-				if !e.IsDir() && strings.HasSuffix(e.Name(), ".mokuro") && e.Name() != target {
-					built[e.Name()] = true
-				}
-			}
-		}
-	}
+	mokuroErrCh := make(chan error, 1)
+	go func() { mokuroErrCh <- runMokuro(ctx, mokuroDir, volumeDirs, noCache, detectorSize, onVolume) }()
+
 	buildNewVolumes := func() {
-		newOK, newFail := buildEPUBsForNewMokuroFiles(mokuroDir, volumesBaseDir, output, built, series, seriesIndex)
+		newOK, newFail := buildEPUBsForNewMokuroFiles(mokuroDir, volumesBaseDir, output, builtMTime, series, seriesIndex)
 		ok += newOK
 		fail += newFail
 	}
@@ -160,15 +164,45 @@ pollLoop:
 	return ok, fail, nil
 }
 
-// Builds an EPUB for each ".mokuro" not yet in built, marking it built either
-// way (a failure isn't retried). Non-empty series overrides the derived one.
-func buildEPUBsForNewMokuroFiles(mokuroDir, volumesBaseDir, output string, built map[string]bool, series string, seriesIndex map[string]float64) (ok, fail int) {
+// snapshotMokuroMTimes records the current mtime of every ".mokuro" file already
+// in dir, so buildEPUBsForNewMokuroFiles can tell an untouched leftover from one
+// mokuro has genuinely (re)written during this run.
+func snapshotMokuroMTimes(dir string) map[string]time.Time {
+	m := map[string]time.Time{}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return m
+	}
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".mokuro") {
+			continue
+		}
+		if info, err := e.Info(); err == nil {
+			m[e.Name()] = info.ModTime()
+		}
+	}
+	return m
+}
+
+// Builds an EPUB for each ".mokuro" whose mtime has changed since builtMTime was
+// last recorded for it (or that isn't in builtMTime at all), then records the new
+// mtime either way (a failed build isn't retried until the file changes again).
+// Non-empty series overrides the derived one.
+func buildEPUBsForNewMokuroFiles(mokuroDir, volumesBaseDir, output string, builtMTime map[string]time.Time, series string, seriesIndex map[string]float64) (ok, fail int) {
 	entries, err := os.ReadDir(mokuroDir)
 	if err != nil {
 		return 0, 0
 	}
 	for _, e := range entries {
-		if e.IsDir() || !strings.HasSuffix(e.Name(), ".mokuro") || built[e.Name()] {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".mokuro") {
+			continue
+		}
+		info, err := e.Info()
+		if err != nil {
+			continue
+		}
+		mtime := info.ModTime()
+		if prev, ok := builtMTime[e.Name()]; ok && prev.Equal(mtime) {
 			continue
 		}
 		mokuroPath := filepath.Join(mokuroDir, e.Name())
@@ -179,7 +213,7 @@ func buildEPUBsForNewMokuroFiles(mokuroDir, volumesBaseDir, output string, built
 			// mean mid-write: retry next tick rather than counting it failed.
 			continue
 		}
-		built[e.Name()] = true
+		builtMTime[e.Name()] = mtime
 		vol.Series = series
 		vol.SeriesIndex = seriesIndex[vol.Volume]
 

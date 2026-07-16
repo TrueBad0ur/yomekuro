@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"os"
 	"os/exec"
@@ -107,7 +108,7 @@ func (t *progressThrottleWriter) emit(line []byte) error {
 
 // Runs mokuro OCR. Cancelling ctx kills the subprocess (that's how Stop works)
 // and skips the retry loop — a stop is deliberate, not a transient failure.
-func runMokuro(ctx context.Context, inputDir string, volumeDirs []string, noCache bool, onVolume func(string)) error {
+func runMokuro(ctx context.Context, inputDir string, volumeDirs []string, noCache bool, detectorSize int, onVolume func(string)) error {
 	// --no-cache for specific volumes: clear just their cached results, since
 	// mokuro checks the .mokuro file's existence to skip "already processed".
 	if noCache && len(volumeDirs) > 0 {
@@ -140,9 +141,12 @@ func runMokuro(ctx context.Context, inputDir string, volumeDirs []string, noCach
 	var err error
 	for attempt := 1; attempt <= mokuroRetries; attempt++ {
 		cmd := exec.CommandContext(ctx, "python", args...)
+		// mokuro_run.py reads this to pick MokuroGenerator's detector_input_size —
+		// see its own comment for why this is configurable per job rather than fixed.
+		cmd.Env = append(os.Environ(), fmt.Sprintf("MOKURO_DETECTOR_INPUT_SIZE=%d", detectorSize))
 		cmd.Stdout = &progressThrottleWriter{dst: os.Stdout, every: progressEvery}
 		cmd.Stderr = &progressThrottleWriter{dst: os.Stderr, every: progressEvery, onVolume: onVolume}
-		slog.Info("exec", "cmd", cmd.String(), "attempt", attempt)
+		slog.Info("exec", "cmd", cmd.String(), "attempt", attempt, "detector_size", detectorSize)
 		if err = cmd.Run(); err == nil {
 			return nil
 		}

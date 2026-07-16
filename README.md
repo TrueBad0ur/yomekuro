@@ -40,12 +40,11 @@ picks `truebad0ur/yomekuro:<tag>`, `CONVERTER_VERSION` picks
 other when only one side actually changed. See "Releasing" below for how versions
 get published to Docker Hub.
 
-Mounts a single `./library` — with four subfolders inside, `ranobe/`, `manga/`,
-`html/`, and `pdf/` (one series per subfolder of the first two, `.epub` files
-inside; `html/` holds standalone `.html` files, one file = one book; `pdf/` is
-for PDFs that aren't manga or ranobe — see "Converter" below, same upload
-pipeline applies). All four are registered as separate libraries and scanned
-automatically on boot. Open http://localhost:8080 and log in.
+Mounts a single `./library` — with two subfolders inside, `books/` and `manga/`
+(one series per subfolder, `.epub` files inside; `books/` also holds
+standalone `.html` files directly, one file = one book). Both are registered
+as separate libraries and scanned automatically on boot. Open
+http://localhost:8080 and log in.
 
 The dev compose also brings up the converter services (`converter`,
 `converter-gpu`, `converter-worker` — see "Converter" below) via
@@ -58,9 +57,10 @@ works standalone if you only want the converter without yomekuro.
 
 ### Library page
 
-The home page lists your series as cover-art tiles, grouped by library
-(Ranobe / Manga / HTML / PDF) in the sidebar. Click a series to see its books,
-click a book to start reading. Search and genre/tag filters are in the header.
+The home page lists your series as cover-art tiles. A centered tab row above
+the grid switches between "All Titles" and each library (Books / Manga);
+click a series to see its books, click a book to start reading. Search and
+genre/tag filters are in the header.
 
 Each book has a **⋯** menu (top-right of its cover) to **mark the volume read or
 unread** — handy when you finish a book somewhere other than its last page.
@@ -102,9 +102,9 @@ uploading manga for OCR conversion.
 
 ![Settings page](docs/screenshots/settings.png)
 
-### Uploading (admin only)
+### Upload & Jobs (admin only)
 
-Settings → Uploading: pick a library, drop one or more archives of raw page
+Settings → Upload & Jobs: pick a library, drop one or more archives of raw page
 images, PDFs, and/or standalone `.html` files onto the upload area, and a
 name. **Several files can be selected at once** — each archive/PDF becomes
 its own conversion job and they queue up; an `.html` file needs no
@@ -120,9 +120,9 @@ stopped (or removed once finished).
 
 ![Upload/conversion log](docs/screenshots/conversion-log.png)
 
-### Converting (admin only)
+### Manage Books (admin only)
 
-Settings → Converting lists every book already in a library, per volume:
+Settings → Manage Books lists every book already in a library, per volume:
 
 - **Reconvert (full OCR)** — re-runs OCR from scratch (not a cache-reuse
   rebuild) for one volume or the whole book, so it picks up any
@@ -137,7 +137,9 @@ Settings → Converting lists every book already in a library, per volume:
   offers an HTML download.
 - **Delete** — permanently removes a book: its EPUB(s) *and* its raw scan
   folder, if any. Confirmed via a browser dialog first, and blocked while a
-  conversion job is queued or running against it. No undo.
+  conversion job is queued or running against it. No undo. A single volume
+  can also be deleted on its own, leaving the rest of the book (and its
+  shared raw scan folder) intact.
 
 ---
 
@@ -274,7 +276,7 @@ one-shot CLI), `converter-gpu` (AMD ROCm, one-shot CLI), and `converter-worker`
 
 ### Upload via UI (recommended)
 
-Settings → Uploading: pick a library, a file, and a name. The file is
+Settings → Upload & Jobs: pick a library, a file, and a name. The file is
 either an archive (`.zip`/`.tar`/`.tar.gz`/`.tar.xz`/`.7z`/`.rar`) of raw page
 images, or a `.pdf`. yomekuro stages it into `<library>/<name>-in/`
 (extracting archives and stripping OS junk — `.DS_Store`, `__MACOSX/`, `._*`
@@ -409,20 +411,19 @@ volumes:
   - ./library:/library
 ```
 
-Inside it, four subfolders are each auto-registered as their own library and
+Inside it, two subfolders are each auto-registered as their own library and
 scanned on boot — no manual "add library" step needed:
 
 ```
 library/
-  ranobe/   # light novel EPUBs, one folder per series
   manga/    # manga EPUBs (converter output or your own), one folder per series
-  html/     # standalone .html files, one file = one book
-  pdf/      # PDFs that aren't manga or ranobe — same upload/converter pipeline
+  books/    # everything else: light novels, PDFs, standalone .html files —
+            # one folder per series/book, .html files sit directly inside
 ```
 
-The whole `./library` mount is read-write (not `:ro`) because the manga
-upload feature extracts archives directly into `library/manga/` (and PDFs
-into whichever library you pick, including `library/pdf/`).
+The whole `./library` mount is read-write (not `:ro`) because the upload
+feature extracts archives directly into whichever library you pick
+(`library/manga/` or `library/books/`).
 
 HTML book titles come from `<title>`, with optional
 `<meta name="author" content="...">` and

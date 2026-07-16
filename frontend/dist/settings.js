@@ -381,6 +381,25 @@ document.getElementById('conversion-jobs').addEventListener('click', async (e) =
 
 const booksLibraryPicker = document.getElementById('books-library-picker');
 let selectedBooksLibraryId = '';
+let booksListData = [];
+let booksExpanded = new Set();
+const booksSearchInput = document.getElementById('books-search');
+if (booksSearchInput) {
+  booksSearchInput.addEventListener('input', () => renderBooksList());
+}
+
+function formatAnalyzed(iso) {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (isNaN(d)) return '';
+  return d.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
+}
+
+function lastAnalyzed(item) {
+  const dates = item.volumes.map(v => v.modified_at).filter(Boolean);
+  if (dates.length === 0) return '';
+  return dates.reduce((a, b) => (a > b ? a : b));
+}
 
 function renderBooksLibraryPicker(libraries) {
   booksLibraryPicker.innerHTML = '';
@@ -406,21 +425,39 @@ function renderBooksLibraryPicker(libraries) {
 
 async function loadBooksList() {
   const list = document.getElementById('books-list');
-  if (!selectedBooksLibraryId) { list.innerHTML = ''; return; }
+  if (!selectedBooksLibraryId) { list.innerHTML = ''; booksListData = []; return; }
   list.innerHTML = '<p style="color:var(--text-dim);font-size:.88rem">Loading…</p>';
-  let data;
   try {
-    data = await fetch(`/api/converter/reconvertable?library=${selectedBooksLibraryId}`).then(r => r.json());
+    const data = await fetch(`/api/converter/reconvertable?library=${selectedBooksLibraryId}`).then(r => r.json());
+    booksListData = data.items || [];
   } catch {
     list.innerHTML = '<p style="color:var(--text-dim)">Failed to load books.</p>';
     return;
   }
-  const items = data.items || [];
-  if (items.length === 0) {
+  renderBooksList();
+}
+
+// Rendered from the cached booksListData rather than re-fetching, so typing in
+// the search box or expanding/collapsing a book is instant. The list is kept
+// collapsed to a one-line header per book by default — a growing library
+// otherwise turns this into an endless per-volume scroll — and only expands
+// to show per-volume rows on click.
+function renderBooksList() {
+  const list = document.getElementById('books-list');
+  if (booksListData.length === 0) {
     list.innerHTML = '<p style="color:var(--text-dim);font-size:.88rem">No books in this library.</p>';
     return;
   }
+  const query = (booksSearchInput?.value || '').trim().toLowerCase();
+  const items = query ? booksListData.filter(s => s.name.toLowerCase().includes(query)) : booksListData;
+  if (items.length === 0) {
+    list.innerHTML = '<p style="color:var(--text-dim);font-size:.88rem">No books match your search.</p>';
+    return;
+  }
   list.innerHTML = items.map(s => {
+    const analyzed = lastAnalyzed(s);
+    const analyzedLabel = analyzed ? `<span class="library-card-analyzed" title="Last analyzed">Analyzed ${formatAnalyzed(analyzed)}</span>` : '';
+
     if (s.kind === 'html') {
       // A standalone HTML file: one book, one file, one obvious format — no
       // picker, no reconvert (never went through this app's conversion at all).
@@ -429,15 +466,20 @@ async function loadBooksList() {
         <div class="library-card-name">${esc(s.name)}</div>
         <div class="library-card-footer">
           <span class="library-card-count">HTML file</span>
+          ${analyzedLabel}
           <button class="reconvert-btn dl-btn" data-name="${esc(s.name)}" data-volume="${esc(s.name)}" data-kind="html" data-format="html">Download HTML</button>
           <button class="job-delete-btn book-delete-btn" data-name="${esc(s.name)}" data-kind="html">Delete</button>
         </div>
       </div>`;
     }
 
+    const expanded = booksExpanded.has(s.name);
     const volumeRows = s.volumes.map(v => `
       <div class="reconvert-volume-row">
-        <span class="reconvert-volume-name">${esc(v.name)}</span>
+        <div class="reconvert-volume-header">
+          <span class="reconvert-volume-name">${esc(v.name)}</span>
+          ${v.modified_at ? `<span class="reconvert-volume-analyzed" title="Last analyzed">${formatAnalyzed(v.modified_at)}</span>` : ''}
+        </div>
         <div class="reconvert-volume-actions">
           ${v.has_images ? `
             <select class="dl-format-picker" aria-label="Download format">
@@ -449,26 +491,50 @@ async function loadBooksList() {
           ` : `
             <button class="reconvert-btn dl-btn" data-name="${esc(s.name)}" data-volume="${esc(v.name)}" data-format="epub">Download EPUB</button>
           `}
-          ${s.has_raw_scan ? `<button class="reconvert-btn" data-name="${esc(s.name)}" data-volume="${esc(v.name)}">Reconvert (full OCR)</button>` : ''}
+          ${s.has_raw_scan ? `
+            <select class="detector-size-picker" aria-label="OCR detail level" title="Text-detector resolution — higher catches more, but is slower">
+              <option value="3072" selected>3072 (default, ~5.5GB GPU)</option>
+              <option value="2048">2048 (faster, ~3GB GPU)</option>
+            </select>
+            <button class="reconvert-btn" data-name="${esc(s.name)}" data-volume="${esc(v.name)}">Reconvert (full OCR)</button>
+          ` : ''}
+          <button class="job-delete-btn volume-delete-btn" data-name="${esc(s.name)}" data-volume="${esc(v.name)}">Delete</button>
         </div>
       </div>`).join('');
     return `
     <div class="library-card">
-      <div class="library-card-name">${esc(s.name)}</div>
+      <button class="book-expand-toggle" data-name="${esc(s.name)}" aria-expanded="${expanded}">
+        <span class="book-expand-arrow">${expanded ? '▾' : '▸'}</span>
+        <span class="library-card-name">${esc(s.name)}</span>
+      </button>
       <div class="library-card-footer">
         <span class="library-card-count">${s.volumes.length} volume${s.volumes.length === 1 ? '' : 's'}</span>
+        ${analyzedLabel}
         ${s.has_raw_scan
-          ? `<button class="reconvert-btn" data-name="${esc(s.name)}">Reconvert all (full OCR)</button>`
+          ? `<select class="detector-size-picker" aria-label="OCR detail level" title="Text-detector resolution — higher catches more, but is slower">
+              <option value="3072" selected>3072 (default, ~5.5GB GPU)</option>
+              <option value="2048">2048 (faster, ~3GB GPU)</option>
+            </select>
+            <button class="reconvert-btn" data-name="${esc(s.name)}">Reconvert all (full OCR)</button>`
           : `<span class="reconvert-no-scan" title="Raw scan no longer on disk — reconvert needs a fresh upload">no raw scan</span>`}
         <button class="job-delete-btn book-delete-btn" data-name="${esc(s.name)}">Delete</button>
       </div>
       <p class="reconvert-error" style="color:#e07070;font-size:.78rem;margin:.35rem 0 0" hidden></p>
-      ${volumeRows ? `<div class="reconvert-volumes">${volumeRows}</div>` : ''}
+      ${volumeRows ? `<div class="reconvert-volumes" ${expanded ? '' : 'hidden'}>${volumeRows}</div>` : ''}
     </div>`;
   }).join('');
 }
 
 document.getElementById('books-list').addEventListener('click', async (e) => {
+  const toggleBtn = e.target.closest('.book-expand-toggle');
+  if (toggleBtn) {
+    const name = toggleBtn.dataset.name;
+    if (booksExpanded.has(name)) booksExpanded.delete(name);
+    else booksExpanded.add(name);
+    renderBooksList();
+    return;
+  }
+
   const dlBtn = e.target.closest('.dl-btn');
   if (dlBtn) {
     // A fixed data-format (HTML file, or a no-images EPUB-only row) skips the
@@ -486,15 +552,20 @@ document.getElementById('books-list').addEventListener('click', async (e) => {
     return;
   }
 
-  const delBtn = e.target.closest('.book-delete-btn');
+  const delBtn = e.target.closest('.book-delete-btn, .volume-delete-btn');
   if (delBtn) {
     const name = delBtn.dataset.name;
-    if (!confirm(`Permanently delete "${name}"? This removes the EPUB(s) and the raw scan from disk — cannot be undone.`)) {
+    const volume = delBtn.dataset.volume || '';
+    const confirmMsg = volume
+      ? `Permanently delete volume "${volume}" from "${name}"? This removes just this EPUB and its own raw scan — cannot be undone.`
+      : `Permanently delete "${name}"? This removes the EPUB(s) and the raw scan from disk — cannot be undone.`;
+    if (!confirm(confirmMsg)) {
       return;
     }
     delBtn.disabled = true;
     delBtn.textContent = 'Deleting…';
     let url = `/api/converter/books?library=${encodeURIComponent(selectedBooksLibraryId)}&name=${encodeURIComponent(name)}`;
+    if (volume) url += `&volume=${encodeURIComponent(volume)}`;
     if (delBtn.dataset.kind) url += `&kind=${encodeURIComponent(delBtn.dataset.kind)}`;
     try {
       const res = await fetch(url, { method: 'DELETE' });
@@ -519,6 +590,8 @@ document.getElementById('books-list').addEventListener('click', async (e) => {
   const card = btn.closest('.library-card');
   const errEl = card.querySelector('.reconvert-error');
   const label = btn.dataset.volume ? 'Reconvert (full OCR)' : 'Reconvert all (full OCR)';
+  const sizePicker = btn.parentElement.querySelector('.detector-size-picker');
+  const detectorSize = sizePicker ? parseInt(sizePicker.value, 10) : 2048;
   errEl.hidden = true;
   btn.disabled = true;
   btn.textContent = 'Queuing…';
@@ -530,6 +603,7 @@ document.getElementById('books-list').addEventListener('click', async (e) => {
         library_id: selectedBooksLibraryId,
         name: btn.dataset.name,
         volume: btn.dataset.volume || '',
+        detector_size: detectorSize,
       }),
     });
     if (!res.ok) {

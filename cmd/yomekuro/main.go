@@ -45,12 +45,13 @@ func main() {
 		slog.Warn("YOMEKURO_ADMIN_PASSWORD not set — admin will not be created automatically")
 	}
 
-	// All four live under one /library mount, one subfolder each.
+	// Both live under one /library mount, one subfolder each. "Books" absorbs
+	// what used to be three separate libraries (Ranobe/HTML/PDF) — the format
+	// (epub vs html) and origin (scan vs digital) were never really a useful
+	// split for browsing, they're both just "not manga".
 	for _, def := range []struct{ name, path string }{
-		{"Ranobe", "/library/ranobe"},
+		{"Books", "/library/books"},
 		{"Manga", "/library/manga"},
-		{"HTML", "/library/html"},
-		{"PDF", "/library/pdf"},
 	} {
 		if _, err := db.EnsureDefaultLibrary(ctx, pool, def.name, def.path); err != nil {
 			slog.Error("EnsureDefaultLibrary", "err", err)

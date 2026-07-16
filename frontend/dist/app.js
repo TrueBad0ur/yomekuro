@@ -32,20 +32,6 @@ document.querySelectorAll('.theme-opt').forEach(btn => {
 
 applyTheme(localStorage.getItem('theme') || 'dark');
 
-// ── Sidebar ───────────────────────────────────────────────────────────────────
-
-const sidebar      = document.getElementById('sidebar');
-const overlay      = document.getElementById('sidebar-overlay');
-const hamburger    = document.getElementById('hamburger');
-const sidebarClose = document.getElementById('sidebar-close');
-
-function openSidebar()  { sidebar.classList.add('open');    overlay.classList.add('visible'); }
-function closeSidebar() { sidebar.classList.remove('open'); overlay.classList.remove('visible'); }
-
-hamburger.addEventListener('click', openSidebar);
-sidebarClose.addEventListener('click', closeSidebar);
-overlay.addEventListener('click', closeSidebar);
-
 // ── State ─────────────────────────────────────────────────────────────────────
 
 let allSeries   = [];
@@ -99,7 +85,6 @@ function renderSeriesGrid(items, emptyText) {
       activeTag = '';
       renderTagChips();
       showBooks(s.name);
-      closeSidebar();
     });
     grid.appendChild(card);
   }
@@ -136,7 +121,6 @@ async function showLibrary(lib, headerEl) {
   activeTag = '';
   renderTagChips();
   if (headerEl) setActiveNav(headerEl);
-  closeSidebar();
 
   grid.innerHTML = '<p style="padding:1.5rem;color:var(--text-dim)">Loading…</p>';
   emptyMsg.hidden = true;
@@ -290,7 +274,6 @@ function renderTagChips() {
         activeTag = tag;
         renderTagChips();
         showTaggedBooks(tag);
-        closeSidebar();
       }
     });
     tagChips.appendChild(btn);
@@ -429,7 +412,7 @@ async function openTagEditor(bookId, bookTitle, anchorEl) {
       body: JSON.stringify({ tags }),
     });
     render();
-    loadTags(); // refresh tag chips in sidebar
+    loadTags(); // refresh tag chips
   }
 
   render();
@@ -460,7 +443,7 @@ async function loadSeries() {
   showTitles();
 }
 
-// ── Library tree (sidebar) ───────────────────────────────────────────────────
+// ── Library tabs (top bar) ────────────────────────────────────────────────────
 
 async function loadLibraries() {
   let libs;
@@ -502,7 +485,6 @@ navAllTitles.addEventListener('click', () => {
   activeTag = '';
   renderTagChips();
   showTitles();
-  closeSidebar();
 });
 
 // ── Logo ──────────────────────────────────────────────────────────────────────
@@ -513,7 +495,6 @@ document.getElementById('logo-home').addEventListener('click', () => {
   activeTag = '';
   renderTagChips();
   showTitles();
-  closeSidebar();
 });
 
 // ── Search ────────────────────────────────────────────────────────────────────
@@ -573,7 +554,7 @@ function esc(s) {
 checkAuth().then(ok => {
   if (!ok) return;
   if (!currentUser.is_admin) {
-    const settingsLink = document.querySelector('.sidebar-footer .footer-link');
+    const settingsLink = document.getElementById('settings-link');
     if (settingsLink) settingsLink.hidden = true;
   }
   loadSeries();

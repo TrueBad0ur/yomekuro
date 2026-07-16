@@ -154,6 +154,33 @@ func containerXML() string {
 </container>`
 }
 
+// volumeDirection infers page-progression-direction from mokuro's own per-block
+// vertical/horizontal detection instead of assuming manga's usual right-to-left:
+// traditional manga is vertical text, bound right-to-left, but children's graded
+// readers and western-style-digitized PDFs are predominantly horizontal text,
+// bound left-to-right. Counts characters rather than blocks so one short vertical
+// caption on an otherwise-horizontal page doesn't flip the whole volume.
+func volumeDirection(vol MokuroVolume) string {
+	var vertChars, horizChars int
+	for _, page := range vol.Pages {
+		for _, blk := range page.Blocks {
+			n := 0
+			for _, line := range blk.Lines {
+				n += utf8.RuneCountInString(line)
+			}
+			if blk.Vertical {
+				vertChars += n
+			} else {
+				horizChars += n
+			}
+		}
+	}
+	if horizChars > vertChars {
+		return "ltr"
+	}
+	return "rtl"
+}
+
 func contentOPF(vol MokuroVolume, images []imgEntry) string {
 	var b strings.Builder
 	now := time.Now().UTC().Format("2006-01-02T15:04:05Z")
@@ -207,9 +234,9 @@ func contentOPF(vol MokuroVolume, images []imgEntry) string {
 		fmt.Fprintf(&b, `    <item id="p%04d" href="pages/p%04d.xhtml" media-type="application/xhtml+xml"/>
 `, i+1, i+1)
 	}
-	b.WriteString(`  </manifest>
-  <spine page-progression-direction="rtl">
-`)
+	fmt.Fprintf(&b, `  </manifest>
+  <spine page-progression-direction="%s">
+`, volumeDirection(vol))
 	for i := range vol.Pages {
 		fmt.Fprintf(&b, `    <itemref idref="p%04d"/>
 `, i+1)

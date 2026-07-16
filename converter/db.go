@@ -40,12 +40,13 @@ func reclaimOrphanedJobs(ctx context.Context, pool *pgxpool.Pool) error {
 // A claimed row from conversion_jobs. id stays text — it's only ever passed back
 // in a WHERE clause.
 type job struct {
-	ID         string
-	Name       string
-	InputPath  string
-	OutputPath string
-	ForceOCR   bool
-	Volume     string
+	ID           string
+	Name         string
+	InputPath    string
+	OutputPath   string
+	ForceOCR     bool
+	Volume       string
+	DetectorSize int
 }
 
 // Atomically claims the oldest pending job, or (nil, nil) if the queue is empty.
@@ -62,8 +63,8 @@ func claimNextJob(ctx context.Context, pool *pgxpool.Pool) (*job, error) {
 			FOR UPDATE SKIP LOCKED
 			LIMIT 1
 		)
-		RETURNING id::text, name, input_path, output_path, force_ocr, volume
-	`).Scan(&j.ID, &j.Name, &j.InputPath, &j.OutputPath, &j.ForceOCR, &j.Volume)
+		RETURNING id::text, name, input_path, output_path, force_ocr, volume, detector_size
+	`).Scan(&j.ID, &j.Name, &j.InputPath, &j.OutputPath, &j.ForceOCR, &j.Volume, &j.DetectorSize)
 	if err == pgx.ErrNoRows {
 		return nil, nil
 	}

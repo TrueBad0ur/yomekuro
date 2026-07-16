@@ -90,7 +90,11 @@ func processQueuedJob(ctx context.Context, pool *pgxpool.Pool, j *job) {
 			slog.Warn("watch: update current volume failed", "job", j.Name, "err", err)
 		}
 	}
-	ok, fail, err := Convert(jobCtx, j.InputPath, j.OutputPath, j.Volume, j.ForceOCR, onVolume)
+	detectorSize := j.DetectorSize
+	if detectorSize == 0 {
+		detectorSize = DefaultDetectorSize
+	}
+	ok, fail, err := Convert(jobCtx, j.InputPath, j.OutputPath, j.Volume, j.ForceOCR, detectorSize, onVolume)
 
 	switch {
 	case jobCtx.Err() != nil:
@@ -201,7 +205,7 @@ func scanManualFoldersIn(ctx context.Context, pool *pgxpool.Pool, libraryRoot st
 				delete(manualInProgress, inputDir)
 				manualInProgressMu.Unlock()
 			}()
-			if _, _, err := Convert(context.Background(), inputDir, outputDir, "", false, nil); err != nil {
+			if _, _, err := Convert(context.Background(), inputDir, outputDir, "", false, DefaultDetectorSize, nil); err != nil {
 				slog.Error("watch: manual folder conversion failed", "input", inputDir, "err", err)
 			}
 		}()

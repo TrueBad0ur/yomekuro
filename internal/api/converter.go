@@ -13,6 +13,8 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
+	"unicode"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/truebad0ur/yomekuro/internal/archive"
@@ -55,6 +57,155 @@ func isPDF(filename string) bool {
 func isHTMLFile(filename string) bool {
 	ext := strings.ToLower(filepath.Ext(filename))
 	return ext == ".html" || ext == ".htm"
+}
+
+// An "unconverted" EPUB upload: a page-image scan someone already packaged as
+// an EPUB (e.g. from another tool) rather than a raw archive or PDF, with no
+// Yomitan-selectable OCR text layer yet. Handled like a single-volume archive:
+// its page images are pulled back out into a staging folder and queued for a
+// normal OCR conversion, same as any other fresh upload.
+func isEPUB(filename string) bool {
+	return strings.EqualFold(filepath.Ext(filename), ".epub")
+}
+
+// extractEPUBImages pulls the page images out of an EPUB (anything under an
+// "/images/" path in the zip, same convention this app's own converter uses)
+// into destDir, renumbered page-001.<ext>, page-002.<ext>, ... in page order —
+// not the original in-zip filenames, so the OCR pipeline's own page ordering
+// never depends on how the source EPUB happened to name its entries.
+func extractEPUBImages(epubPath, destDir string) error {
+	zr, err := zip.OpenReader(epubPath)
+	if err != nil {
+		return fmt.Errorf("open epub: %w", err)
+	}
+	defer zr.Close()
+
+	var images []*zip.File
+	for _, f := range zr.File {
+		if strings.Contains(f.Name, "/images/") {
+			images = append(images, f)
+		}
+	}
+	if len(images) == 0 {
+		return fmt.Errorf("no page images found in this EPUB")
+	}
+	sort.Slice(images, func(i, j int) bool {
+		ni, oki := lastNumber(filepath.Base(images[i].Name))
+		nj, okj := lastNumber(filepath.Base(images[j].Name))
+		if oki && okj && ni != nj {
+			return ni < nj
+		}
+		if oki != okj {
+			return oki
+		}
+		return images[i].Name < images[j].Name
+	})
+
+	if err := os.MkdirAll(destDir, 0755); err != nil {
+		return err
+	}
+	for i, f := range images {
+		ext := strings.ToLower(filepath.Ext(f.Name))
+		rc, err := f.Open()
+		if err != nil {
+			return fmt.Errorf("read %s: %w", f.Name, err)
+		}
+		out, err := os.Create(filepath.Join(destDir, fmt.Sprintf("page-%03d%s", i+1, ext)))
+		if err != nil {
+			rc.Close()
+			return err
+		}
+		_, copyErr := io.Copy(out, rc)
+		rc.Close()
+		out.Close()
+		if copyErr != nil {
+			return fmt.Errorf("write page %d: %w", i+1, copyErr)
+		}
+	}
+	return nil
+}
+
+var htmlTagRe = regexp.MustCompile(`<[^>]*>`)
+
+const (
+	epubTextMinCharsPerPage     = 20
+	epubTextMinJapaneseFraction = 0.3
+)
+
+// epubHasTextLayer tells an already-digitized EPUB (real, Yomitan-selectable
+// text baked into its own pages) from a "raw scan" upload that just wraps page
+// images with no text at all — same thresholds and reasoning as the
+// converter's own pdfHasTextLayer check for PDFs, applied to the EPUB's own
+// XHTML page markup instead of pdftotext output, so "does this already have
+// OCR" is judged consistently across both upload paths.
+func epubHasTextLayer(epubPath string) (bool, error) {
+	zr, err := zip.OpenReader(epubPath)
+	if err != nil {
+		return false, fmt.Errorf("open epub: %w", err)
+	}
+	defer zr.Close()
+
+	var pageFiles []*zip.File
+	for _, f := range zr.File {
+		lower := strings.ToLower(f.Name)
+		if !strings.HasSuffix(lower, ".xhtml") && !strings.HasSuffix(lower, ".html") {
+			continue
+		}
+		if strings.Contains(lower, "nav") {
+			continue // table of contents, not page content
+		}
+		pageFiles = append(pageFiles, f)
+	}
+	if len(pageFiles) == 0 {
+		return false, nil
+	}
+
+	chars, jaChars := 0, 0
+	for _, f := range pageFiles {
+		rc, err := f.Open()
+		if err != nil {
+			continue
+		}
+		data, err := io.ReadAll(rc)
+		rc.Close()
+		if err != nil {
+			continue
+		}
+		text := htmlTagRe.ReplaceAllString(string(data), "")
+		for _, r := range text {
+			if unicode.IsSpace(r) {
+				continue
+			}
+			chars++
+			if isJapaneseRune(r) {
+				jaChars++
+			}
+		}
+	}
+	if chars/len(pageFiles) < epubTextMinCharsPerPage {
+		return false, nil
+	}
+	return float64(jaChars)/float64(chars) >= epubTextMinJapaneseFraction, nil
+}
+
+// Whether r is hiragana, katakana, kanji, or CJK/fullwidth punctuation —
+// mirrors converter/pdf.go's isJapanese (separate Go module, no shared
+// internal package to put this in instead).
+func isJapaneseRune(r rune) bool {
+	switch {
+	case r >= 0x3040 && r <= 0x30FF: // Hiragana + Katakana
+		return true
+	case r >= 0x4E00 && r <= 0x9FFF: // CJK Unified Ideographs
+		return true
+	case r >= 0x3400 && r <= 0x4DBF: // CJK Extension A
+		return true
+	case r >= 0x3000 && r <= 0x303F: // CJK punctuation
+		return true
+	case r >= 0xFF00 && r <= 0xFFEF: // Halfwidth/fullwidth forms
+		return true
+	default:
+		return false
+	}
 }
 
 // Rejects path separators and leading dots, so the "<name>-in"/"<name>" folders
@@ -103,8 +254,8 @@ func (s *Server) uploadArchive(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if !isSupportedArchive(header.Filename) && !isPDF(header.Filename) {
-		respondError(w, http.StatusBadRequest, "unsupported format (need .zip/.tar/.tar.gz/.tar.xz/.7z/.rar, .pdf, or .html)")
+	if !isSupportedArchive(header.Filename) && !isPDF(header.Filename) && !isEPUB(header.Filename) {
+		respondError(w, http.StatusBadRequest, "unsupported format (need .zip/.tar/.tar.gz/.tar.xz/.7z/.rar, .pdf, .epub, or .html)")
 		return
 	}
 
@@ -204,6 +355,62 @@ func (s *Server) uploadArchive(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		dst.Close()
+	} else if isEPUB(header.Filename) {
+		volName, err := sanitizeName(stripArchiveExt(header.Filename))
+		if err != nil {
+			respondError(w, http.StatusBadRequest, "invalid file name")
+			return
+		}
+		if addToExisting {
+			if _, err := os.Stat(filepath.Join(outDir, volName+".epub")); err == nil {
+				respondError(w, http.StatusConflict, "this book already has a volume with that name")
+				return
+			}
+		}
+
+		tmpEPUBPath := filepath.Join(stagingDir, volName+".epub")
+		dst, err := os.Create(tmpEPUBPath)
+		if err != nil {
+			respondError(w, http.StatusInternalServerError, "cannot save upload: "+err.Error())
+			return
+		}
+		if _, err := io.Copy(dst, file); err != nil {
+			dst.Close()
+			respondError(w, http.StatusInternalServerError, "cannot save upload: "+err.Error())
+			return
+		}
+		dst.Close()
+
+		hasText, err := epubHasTextLayer(tmpEPUBPath)
+		if err != nil {
+			respondError(w, http.StatusBadRequest, "cannot read epub: "+err.Error())
+			return
+		}
+		if hasText {
+			// Already has real, Yomitan-selectable text — nothing to OCR. Place it
+			// directly as a finished volume; the next scan (or the library's own
+			// fsnotify watch) picks it up like any manually-dropped-in file.
+			if err := os.MkdirAll(outDir, 0755); err != nil {
+				respondError(w, http.StatusInternalServerError, "cannot create book folder: "+err.Error())
+				return
+			}
+			if err := os.Rename(tmpEPUBPath, filepath.Join(outDir, volName+".epub")); err != nil {
+				respondError(w, http.StatusInternalServerError, "cannot move upload: "+err.Error())
+				return
+			}
+			w.WriteHeader(http.StatusCreated)
+			respond(w, map[string]string{"name": name, "status": "done"})
+			return
+		}
+
+		// No usable text layer: treat it like a raw scan — pull its page images
+		// back out into a fresh volume folder and let it fall through to the
+		// normal OCR queue below, same as an image archive or PDF.
+		if err := extractEPUBImages(tmpEPUBPath, filepath.Join(stagingDir, volName)); err != nil {
+			respondError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		os.Remove(tmpEPUBPath)
 	} else {
 		tmpArchive, err := os.CreateTemp("", "upload-*"+matchedArchiveExt(header.Filename))
 		if err != nil {
@@ -308,6 +515,7 @@ type conversionJobDTO struct {
 	StopRequested bool   `json:"stop_requested,omitempty"`
 	ForceOCR      bool   `json:"force_ocr,omitempty"`
 	Volume        string `json:"volume,omitempty"`
+	DetectorSize  int    `json:"detector_size,omitempty"`
 	UpdatedAt     string `json:"updated_at"`
 }
 
@@ -330,6 +538,7 @@ func (s *Server) listConversionJobs(w http.ResponseWriter, r *http.Request) {
 			StopRequested: j.StopRequested,
 			ForceOCR:      j.ForceOCR,
 			Volume:        j.Volume,
+			DetectorSize:  j.DetectorSize,
 			UpdatedAt:     j.UpdatedAt.UTC().Format("2006-01-02T15:04:05Z"),
 		}
 	}
@@ -377,8 +586,20 @@ func lastNumber(name string) (int, bool) {
 }
 
 type reconvertVolumeDTO struct {
-	Name      string `json:"name"`
-	HasImages bool   `json:"has_images"`
+	Name       string `json:"name"`
+	HasImages  bool   `json:"has_images"`
+	ModifiedAt string `json:"modified_at,omitempty"`
+}
+
+// fileModTime returns a file's own mtime (RFC3339, UTC) — for a converter-produced
+// EPUB this is effectively "when it was last (re)analyzed", since nothing else in
+// this app ever rewrites a book's EPUB file after conversion.
+func fileModTime(path string) string {
+	info, err := os.Stat(path)
+	if err != nil {
+		return ""
+	}
+	return info.ModTime().UTC().Format(time.RFC3339)
 }
 
 type reconvertCandidateDTO struct {
@@ -448,7 +669,7 @@ func (s *Server) listReconvertable(w http.ResponseWriter, r *http.Request) {
 		sortVolumeNames(names)
 		volumes := make([]reconvertVolumeDTO, len(names))
 		for i, n := range names {
-			volumes[i] = reconvertVolumeDTO{Name: n, HasImages: epubHasImages(byName[n])}
+			volumes[i] = reconvertVolumeDTO{Name: n, HasImages: epubHasImages(byName[n]), ModifiedAt: fileModTime(byName[n])}
 		}
 		inDir := filepath.Join(lib.Path, e.Name()+"-in")
 		hasRawScan := false
@@ -474,7 +695,7 @@ func (s *Server) listReconvertable(w http.ResponseWriter, r *http.Request) {
 			Name: name,
 			Kind: "html",
 			Volumes: []reconvertVolumeDTO{
-				{Name: name, HasImages: false},
+				{Name: name, HasImages: false, ModifiedAt: fileModTime(filepath.Join(lib.Path, e.Name()))},
 			},
 			HasRawScan: false,
 		})
@@ -490,13 +711,21 @@ func (s *Server) listReconvertable(w http.ResponseWriter, r *http.Request) {
 // original conversion — a cache-reuse rebuild wouldn't pick up OCR improvements.
 func (s *Server) reconvertSeries(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		LibraryID string `json:"library_id"`
-		Name      string `json:"name"`
-		Volume    string `json:"volume"`
+		LibraryID    string `json:"library_id"`
+		Name         string `json:"name"`
+		Volume       string `json:"volume"`
+		DetectorSize int    `json:"detector_size"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		respondError(w, http.StatusBadRequest, "invalid JSON")
 		return
+	}
+	// Only these two are offered in the UI; anything else falls back to the
+	// standard size rather than letting an arbitrary value reach mokuro. 4096
+	// was tried and dropped — it OOMs mokuro's detector on this GPU's 8GB VRAM.
+	detectorSize := 3072
+	if req.DetectorSize == 2048 {
+		detectorSize = 2048
 	}
 	libID, ok := parseID(w, req.LibraryID)
 	if !ok {
@@ -547,7 +776,7 @@ func (s *Server) reconvertSeries(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if _, err := db.CreateReconvertJob(r.Context(), s.db, libID, name, inDir, outDir, volume); err != nil {
+	if _, err := db.CreateReconvertJob(r.Context(), s.db, libID, name, inDir, outDir, volume, detectorSize); err != nil {
 		respondError(w, http.StatusInternalServerError, "cannot queue job: "+err.Error())
 		return
 	}
@@ -779,6 +1008,34 @@ func (s *Server) deleteBook(w http.ResponseWriter, r *http.Request) {
 	}
 	if taken {
 		respondError(w, http.StatusConflict, "a conversion job is queued or running for this book — stop/remove it first")
+		return
+	}
+
+	// A single volume, not the whole book — leave its siblings (and the
+	// shared "-in" scan folder) alone, only drop this one volume's own files.
+	if volParam := r.URL.Query().Get("volume"); volParam != "" {
+		volume, err := sanitizeName(volParam)
+		if err != nil {
+			respondError(w, http.StatusBadRequest, "invalid volume")
+			return
+		}
+		epubPath := filepath.Join(lib.Path, name, volume+".epub")
+		if _, err := os.Stat(epubPath); err != nil {
+			respondError(w, http.StatusNotFound, "volume not found")
+			return
+		}
+		db.DeleteBookByPath(r.Context(), s.db, epubPath)
+		if err := os.Remove(epubPath); err != nil {
+			respondError(w, http.StatusInternalServerError, "failed to delete volume: "+err.Error())
+			return
+		}
+
+		inDir := filepath.Join(lib.Path, name+"-in")
+		os.RemoveAll(filepath.Join(inDir, volume))
+		os.Remove(filepath.Join(inDir, volume+".mokuro"))
+		os.RemoveAll(filepath.Join(inDir, "_ocr", volume))
+
+		w.WriteHeader(http.StatusNoContent)
 		return
 	}
 
