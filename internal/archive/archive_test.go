@@ -44,13 +44,8 @@ func TestExtractZipCollapsesWrappingDir(t *testing.T) {
 		t.Fatal(err)
 	}
 	zw := zip.NewWriter(f)
-	// Packed as `zip -r "Big Order.zip" "Big Order/"` — every entry prefixed
-	// with the archive's own name. Filenames deliberately don't follow a
-	// clean "001.jpg" pattern — real scanlation releases use arbitrary
-	// names (this mirrors an actual archive that hit this bug:
-	// "big_order_v03_0003.jpg", "big_order_v03_0007.jpg", out of numeric
-	// order). The collapse logic only looks at directory structure, never
-	// filenames, so this is what actually needs covering.
+	// Filenames deliberately don't follow a clean "001.jpg" pattern — real
+	// scanlation releases use arbitrary names; collapse only looks at dirs.
 	writeZipEntry(t, zw, "Big Order/vol.01/scan_a7.jpg", "v1pA")
 	writeZipEntry(t, zw, "Big Order/vol.01/page_final.jpg", "v1pB")
 	writeZipEntry(t, zw, "Big Order/vol.02/00_cover.png", "v2pA")
@@ -122,11 +117,8 @@ func TestExtractTarGz(t *testing.T) {
 	assertAbsent(t, filepath.Join(dest, "vol1", "._001.jpg"))
 }
 
-// TestExtractRar needs a real .rar fixture at testdata/sample.rar, which is
-// not committed: RAR is a proprietary format with no free encoder anywhere,
-// so a fixture can't be synthesized in a test like the other formats above.
-// Drop a real .rar there manually to exercise this path; otherwise it's
-// skipped.
+// Needs a real .rar fixture at testdata/sample.rar (not committed, no free
+// encoder exists to synthesize one) — skipped if absent.
 func TestExtractRar(t *testing.T) {
 	src := filepath.Join("testdata", "sample.rar")
 	if _, err := os.Stat(src); os.IsNotExist(err) {

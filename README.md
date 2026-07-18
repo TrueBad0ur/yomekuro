@@ -40,6 +40,10 @@ picks `truebad0ur/yomekuro:<tag>`, `CONVERTER_VERSION` picks
 other when only one side actually changed. See "Releasing" below for how versions
 get published to Docker Hub.
 
+The login page also has a "Register" tab — anyone who can reach the server
+gets a non-admin, read-only account; fine on a private network, worth knowing
+before exposing this to the open internet.
+
 Mounts a single `./library` — with two subfolders inside, `books/` and `manga/`
 (one series per subfolder, `.epub` files inside; `books/` also holds
 standalone `.html` files directly, one file = one book). Both are registered
@@ -116,7 +120,16 @@ the library instead of creating a new one; several volumes may be queued for the
 same book at the same time, including while its original conversion still runs.
 
 Jobs are listed live on the same page with their current volume, and can be
-stopped (or removed once finished).
+stopped (or removed once finished). **Pause Queue** / **Resume Queue** pause
+every queued job except whichever one is actively converting right now (which
+runs to completion) — unlike Stop, pause never touches any file, so a whole
+backlog can be parked for hours (e.g. to let the host cool down) and picked
+back up exactly where it left off.
+
+Every upload's raw, pre-OCR scan is also mirrored into `./backup/<library>/<name>/`
+if a backup dir is configured (`YOMEKURO_BACKUP_DIR`, mounted by default in both
+compose files) — a safety net independent of the conversion pipeline, since OCR
+can be redone from a raw scan but a lost raw scan is gone for good.
 
 ![Upload/conversion log](docs/screenshots/conversion-log.png)
 
@@ -125,21 +138,35 @@ stopped (or removed once finished).
 Settings → Manage Books lists every book already in a library, per volume:
 
 - **Reconvert (full OCR)** — re-runs OCR from scratch (not a cache-reuse
-  rebuild) for one volume or the whole book, so it picks up any
-  converter/mokuro quality improvement. Only available while the book's
-  original raw scan (`<name>-in/`) is still on disk — shows "no raw scan"
-  otherwise.
+  rebuild) for one volume or the whole book, at a chosen text-detector
+  resolution (2048/3072/3584 — higher catches more but needs more GPU VRAM).
+  Only available while the book's original raw scan (`<name>-in/`) is still
+  on disk — shows "no raw scan" otherwise. A **⚠ raw scan changed** badge
+  appears on any volume whose raw-scan files were modified on disk (page
+  reordered/replaced by hand) more recently than its last conversion, so a
+  stale EPUB is easy to spot without comparing timestamps yourself.
 - **Download** — pulls a volume back out as a page-**Images** `.zip`, a
   **PDF**, or the raw **EPUB**, straight from the already-built file, no
   raw scan required. Handy for testing the upload flow again without
   re-sourcing the original scan. A ranobe/plain-EPUB volume (no page images
   at all) only offers an EPUB download; a standalone HTML-library book
   offers an HTML download.
+- **Rename** — overrides the book's display name (`books.series_name` in the
+  DB only, never the file or folder on disk) — the only way to change what a
+  manga/PDF-derived book shows as, since its series name is otherwise baked
+  into each volume's own EPUB metadata at conversion time.
 - **Delete** — permanently removes a book: its EPUB(s) *and* its raw scan
   folder, if any. Confirmed via a browser dialog first, and blocked while a
   conversion job is queued or running against it. No undo. A single volume
   can also be deleted on its own, leaving the rest of the book (and its
   shared raw scan folder) intact.
+
+### Server Status (admin only)
+
+Settings → Server Status shows live host CPU/RAM/GPU metrics (utilization,
+temperature, VRAM), sampled every 15s with the last 4 hours kept in memory
+(resets on restart — this is live telemetry, not stored history). Useful for
+watching GPU load/temperature during a long OCR batch.
 
 ---
 

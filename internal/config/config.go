@@ -11,9 +11,7 @@ type Config struct {
 	Data string
 	Addr string
 
-	// Root directory raw uploaded scans get mirrored into, unconverted, before
-	// OCR — a safety net independent of the conversion pipeline. Empty disables
-	// backup entirely (no directory configured/mounted).
+	// Root dir raw scans get mirrored into before OCR. Empty disables backup.
 	BackupDir string
 
 	AdminUser     string

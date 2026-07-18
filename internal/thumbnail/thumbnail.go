@@ -1,6 +1,5 @@
-// Package thumbnail renders a plain text-card cover image for books that have
-// no cover of their own — currently just standalone HTML-library files, which
-// (unlike EPUB) never carry any embedded cover image to extract.
+// Package thumbnail renders a plain text-card cover for books with no cover
+// of their own — currently just standalone HTML-library files.
 package thumbnail
 
 import (

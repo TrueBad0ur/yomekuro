@@ -1,8 +1,5 @@
-// Package sysstats samples host CPU/RAM/GPU metrics from procfs/sysfs. These
-// paths are visible read-only inside an ordinary (non-privileged) container
-// without any extra docker-compose mounts — procfs and sysfs are shared with
-// the host by default, only /dev device *nodes* need explicit --device
-// passthrough, which this package never touches (it only reads files).
+// Package sysstats samples host CPU/RAM/GPU metrics from procfs/sysfs —
+// visible read-only in an ordinary container, no extra mounts needed.
 package sysstats
 
 import (
@@ -28,8 +25,7 @@ type Sample struct {
 }
 
 // Collector samples the host periodically into a bounded in-memory ring
-// buffer. Ephemeral by design — a restart losing history is fine, this is
-// live telemetry, not something worth persisting to Postgres.
+// buffer — ephemeral by design, not persisted to Postgres.
 type Collector struct {
 	interval time.Duration
 	capacity int
@@ -89,11 +85,8 @@ func (c *Collector) sampleOnce() {
 	}
 
 	if card, ok := findDiscreteGPUCard(); ok {
-		// Read the temp from the *same physical device* as the card chosen
-		// above, not just any hwmon chip named "amdgpu" — a laptop APU
-		// exposes both the discrete GPU and its integrated GPU under that
-		// same chip name, and picking the wrong one silently reports the
-		// (much cooler, idle) iGPU's temperature instead.
+		// Same physical device as the card above, not just any "amdgpu"
+		// hwmon chip — an APU exposes both dGPU and iGPU under that name.
 		if t, ok := discreteGPUHwmonTemp(card); ok {
 			s.GPUTempC = &t
 		}
@@ -138,10 +131,8 @@ func (c *Collector) History() []Sample {
 
 // ── /proc, /sys readers ──────────────────────────────────────────────────
 
-// readCPUJiffies parses the aggregate "cpu " line of /proc/stat: user, nice,
-// system, idle, iowait, irq, softirq, steal — total is the sum of all eight,
-// idle is idle+iowait. Percent-busy is computed by the caller from the delta
-// between two readings, matching the standard /proc/stat CPU% technique.
+// readCPUJiffies parses /proc/stat's aggregate "cpu " line; percent-busy is
+// computed by the caller from the delta between two readings.
 func readCPUJiffies() (total, idle uint64, ok bool) {
 	f, err := os.Open("/proc/stat")
 	if err != nil {
@@ -233,17 +224,9 @@ func readHwmonTemp(chipName string) (float64, bool) {
 	return 0, false
 }
 
-// discreteGPUHwmonTemp reads the temperature reported by the hwmon chip tied
-// to the exact same PCI device as cardDevice (an /sys/class/drm/cardN/device
-// path) — resolved by comparing realpath(cardDevice) against
-// realpath(hwmonN/device), not by chip name, since a laptop APU exposes both
-// the discrete and integrated GPU under the identical "amdgpu" chip name.
-// Prefers the "junction" (hotspot) sensor over "edge" when both exist, since
-// junction is the more representative reading under load; falls back to
-// whichever temp*_input is present and actually readable — a discrete GPU
-// in a runtime-suspended power state can have every temp*_input on its own
-// chip return EINVAL, and that must surface as "no data" rather than
-// silently substituting a different physical device's reading.
+// discreteGPUHwmonTemp matches cardDevice to its hwmon chip by realpath, not
+// chip name (an APU exposes both GPUs as "amdgpu"). Prefers "junction" over
+// "edge"; a runtime-suspended GPU can have every temp*_input read EINVAL.
 func discreteGPUHwmonTemp(cardDevice string) (float64, bool) {
 	cardReal, err := filepath.EvalSymlinks(cardDevice)
 	if err != nil {
@@ -284,10 +267,8 @@ func discreteGPUHwmonTemp(cardDevice string) (float64, bool) {
 	return 0, false
 }
 
-// findDiscreteGPUCard returns the /sys/class/drm/cardN/device directory with
-// the largest mem_info_vram_total — on a laptop with an integrated + discrete
-// GPU, the discrete one is what actually runs mokuro's OCR and is what "GPU
-// load" should mean here.
+// findDiscreteGPUCard picks the card with the largest mem_info_vram_total —
+// the discrete GPU is the one running mokuro's OCR.
 func findDiscreteGPUCard() (string, bool) {
 	matches, err := filepath.Glob("/sys/class/drm/card*/device/mem_info_vram_total")
 	if err != nil || len(matches) == 0 {

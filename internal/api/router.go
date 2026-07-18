@@ -110,10 +110,8 @@ func NewRouter(pool *pgxpool.Pool, sc *scanner.Scanner, w *scanner.Watcher, data
 		})
 	})
 
-	// Serve frontend — clean URLs + static assets. no-cache (not no-store): the
-	// embedded files carry no Last-Modified/ETag for the browser to revalidate
-	// against, so this is the only thing stopping a stale reader.js/style.css
-	// surviving in a phone's cache across a redeploy.
+	// no-cache (not no-store): embedded files carry no ETag, so this is the
+	// only thing stopping a stale reader.js surviving a redeploy.
 	sub, _ := fs.Sub(frontend.FS, "dist")
 	fileServer := http.FileServer(http.FS(sub))
 	noCache := func(w http.ResponseWriter) { w.Header().Set("Cache-Control", "no-cache") }

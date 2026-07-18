@@ -108,6 +108,59 @@ func (t *progressThrottleWriter) emit(line []byte) error {
 
 // Runs mokuro OCR. Cancelling ctx kills the subprocess (that's how Stop works)
 // and skips the retry loop — a stop is deliberate, not a transient failure.
+// reconcileOCRCache removes stale entries from "_ocr/<volume>/" left over from
+// a previous OCR pass whose raw images have since been added, removed, or
+// renamed on disk. mokuro's own generate_mokuro_file() globs the entire cache
+// dir unconditionally and looks up each cached page against a fresh image
+// scan — a leftover entry with no matching image throws an uncaught KeyError
+// and crashes that volume's build. Hit for real: a volume's cover image was
+// replaced by hand (e.g. to fix a missing/blank one) after its first OCR
+// pass, leaving the old cache entry orphaned. Cheap no-op for every volume
+// that hasn't changed, so safe to run unconditionally before every mokuro
+// invocation, not just on an explicit single-volume reconvert.
+func reconcileOCRCache(mokuroDir string) {
+	entries, err := os.ReadDir(mokuroDir)
+	if err != nil {
+		return
+	}
+	imgExts := map[string]bool{".jpg": true, ".jpeg": true, ".png": true, ".webp": true}
+	for _, e := range entries {
+		if !e.IsDir() || e.Name() == "_ocr" {
+			continue
+		}
+		volDir := filepath.Join(mokuroDir, e.Name())
+		cacheDir := filepath.Join(mokuroDir, "_ocr", e.Name())
+		if info, err := os.Stat(cacheDir); err != nil || !info.IsDir() {
+			continue
+		}
+
+		current := map[string]bool{}
+		filepath.WalkDir(volDir, func(path string, d os.DirEntry, err error) error {
+			if err != nil || d.IsDir() || !imgExts[strings.ToLower(filepath.Ext(path))] {
+				return nil
+			}
+			if rel, err := filepath.Rel(volDir, path); err == nil {
+				current[strings.TrimSuffix(rel, filepath.Ext(rel))] = true
+			}
+			return nil
+		})
+
+		filepath.WalkDir(cacheDir, func(path string, d os.DirEntry, err error) error {
+			if err != nil || d.IsDir() || filepath.Ext(path) != ".json" {
+				return nil
+			}
+			rel, err := filepath.Rel(cacheDir, path)
+			if err != nil || current[strings.TrimSuffix(rel, ".json")] {
+				return nil
+			}
+			if rmErr := os.Remove(path); rmErr == nil {
+				slog.Info("removed stale OCR cache entry", "path", path)
+			}
+			return nil
+		})
+	}
+}
+
 func runMokuro(ctx context.Context, inputDir string, volumeDirs []string, noCache bool, detectorSize int, onVolume func(string)) error {
 	// --no-cache for specific volumes: clear just their cached results, since
 	// mokuro checks the .mokuro file's existence to skip "already processed".
@@ -126,10 +179,7 @@ func runMokuro(ctx context.Context, inputDir string, volumeDirs []string, noCach
 		}
 	}
 
-	// -u: Python fully-buffers stdout once it's not a TTY, which would hide
-	// tqdm's progress until the buffer fills or the process exits. mokuro_run.py
-	// (not "-m mokuro" directly) applies our higher-quality detector settings —
-	// see its own comment for why.
+	// -u: unbuffered, so tqdm's progress isn't hidden once stdout isn't a TTY.
 	args := []string{"-u", "/mokuro_run.py", "--disable_confirmation", "--legacy_html=False"}
 	if noCache && len(volumeDirs) == 0 {
 		// global no-cache only when no specific volume selected

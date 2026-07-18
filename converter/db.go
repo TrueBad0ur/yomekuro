@@ -106,9 +106,8 @@ func updateJobVolume(ctx context.Context, pool *pgxpool.Pool, id, volume string)
 	return err
 }
 
-// Whether the row is flagged for cancellation — polled while mokuro runs.
-// pause is checked ahead of stop by the caller: pause never wipes files on
-// cancel, stop does when nothing converted yet, so which one wins matters.
+// Polled while mokuro runs. Caller checks pause ahead of stop: pause never
+// wipes files, stop does when nothing converted yet.
 func checkJobSignals(ctx context.Context, pool *pgxpool.Pool, id string) (stop, pause bool, err error) {
 	err = pool.QueryRow(ctx,
 		`SELECT stop_requested, pause_requested FROM conversion_jobs WHERE id=$1::uuid`, id,
@@ -125,10 +124,8 @@ func markJobStopped(ctx context.Context, pool *pgxpool.Pool, id string) error {
 	return err
 }
 
-// markJobPaused deliberately keeps current_volume (so the UI can show "paused
-// at volume X") and never touches input_path/output_path — the whole point of
-// pause vs stop is that resuming just flips status back to 'pending' with
-// every file exactly where it was.
+// markJobPaused keeps current_volume (UI shows "paused at volume X") and
+// never touches input_path/output_path.
 func markJobPaused(ctx context.Context, pool *pgxpool.Pool, id string) error {
 	_, err := pool.Exec(ctx,
 		`UPDATE conversion_jobs SET status='paused', pause_requested=false, updated_at=NOW() WHERE id=$1::uuid`, id)

@@ -32,6 +32,43 @@ document.querySelectorAll('.theme-opt').forEach(btn => {
 
 applyTheme(localStorage.getItem('theme') || 'dark');
 
+// ── Image/page cache toggle ──────────────────────────────────────────────────
+// 'on' (default): plain URLs, so the browser's HTTP cache (server sends a real
+// max-age now, not just an ETag to revalidate) serves repeat views instantly.
+// 'off': every image/content URL gets a fresh cache-busting query param, so
+// nothing is ever read from cache — for right after a reconvert, when you want
+// to see the new pages immediately instead of whatever the browser cached.
+function getCacheMode() {
+  return localStorage.getItem('cacheMode') || 'on';
+}
+
+function cacheBust(url) {
+  if (getCacheMode() === 'off') {
+    return url + (url.includes('?') ? '&' : '?') + '_nc=' + Date.now();
+  }
+  return url;
+}
+
+function applyCacheMode(mode) {
+  localStorage.setItem('cacheMode', mode);
+  const btn = document.getElementById('btn-cache-toggle');
+  if (btn) btn.textContent = mode === 'off' ? 'Cache: Off' : 'Cache: On';
+  if (mode === 'off' && window.caches && caches.keys) {
+    caches.keys().then(keys => keys.forEach(k => caches.delete(k))).catch(() => {});
+  }
+}
+
+const cacheToggleBtn = document.getElementById('btn-cache-toggle');
+if (cacheToggleBtn) {
+  cacheToggleBtn.addEventListener('click', () => {
+    applyCacheMode(getCacheMode() === 'off' ? 'on' : 'off');
+    // A full reload is the simplest way to make every already-rendered cover
+    // (and reader.js, on its own next load) actually pick up the new mode.
+    location.reload();
+  });
+  applyCacheMode(getCacheMode());
+}
+
 // ── State ─────────────────────────────────────────────────────────────────────
 
 let allSeries   = [];
@@ -70,7 +107,7 @@ function renderSeriesGrid(items, emptyText) {
   for (const s of items) {
     const card = document.createElement('div');
     card.className = 'book-card series-card';
-    const coverURL = s.cover_url || '';
+    const coverURL = s.cover_url ? cacheBust(s.cover_url) : '';
     card.innerHTML = `
       <div class="series-link" data-series="${esc(s.name)}" style="cursor:pointer">
         ${coverURL
@@ -219,7 +256,7 @@ function renderBookGrid(books) {
       </div>` : '';
     card.innerHTML = `
       <a class="book-card-link" href="/reader?id=${b.id}">
-        <img src="/api/books/${b.id}/cover" alt="${esc(b.title)}" loading="lazy"
+        <img src="${cacheBust(`/api/books/${b.id}/cover`)}" alt="${esc(b.title)}" loading="lazy"
              onerror="this.style.display='none'">
         <div class="book-info">
           <div class="book-title">${esc(b.title || '(No title)')}</div>

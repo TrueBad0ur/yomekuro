@@ -10,10 +10,8 @@ import (
 	"strings"
 )
 
-// imageToJPEG decodes an arbitrary source image (jpg/png) and re-encodes it as
-// a plain 3-component RGB JPEG — guarantees every page in the PDF uses the same
-// /DeviceRGB colorspace regardless of the source format, so buildImagesPDF never
-// has to special-case grayscale/CMYK JPEGs or PNGs with an alpha channel.
+// imageToJPEG re-encodes any source image as plain RGB JPEG, so every PDF
+// page uses the same /DeviceRGB colorspace regardless of source format.
 func imageToJPEG(data []byte) (jpegBytes []byte, width, height int, err error) {
 	img, _, err := image.Decode(bytes.NewReader(data))
 	if err != nil {
@@ -34,12 +32,8 @@ type pdfPage struct {
 	width, height int
 }
 
-// buildImagesPDF hand-rolls a minimal PDF: one full-page image per page, no
-// external tool or library — the server module has no PDF dependency and this
-// is the only place that needs one. Each page's MediaBox is sized 1:1 to the
-// image's own pixel dimensions (unusual as physical "points", but this PDF only
-// exists to round-trip back through this app's own converter, which re-rasterizes
-// at its own DPI regardless of the source page size).
+// buildImagesPDF hand-rolls a minimal PDF (no external tool/library needed):
+// one full-page image per page, MediaBox sized 1:1 to the image's own pixels.
 func buildImagesPDF(pages []pdfPage) []byte {
 	n := len(pages)
 	const catalogNum = 1

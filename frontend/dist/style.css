@@ -98,6 +98,12 @@ body.page-library { min-height: 100vh; }
 .breadcrumb-sep { color: var(--text-dim); font-size: 0.88rem; }
 .view-title { font-size: 1rem; font-weight: 600; }
 .header-theme-switcher { margin-left: auto; flex-shrink: 0; }
+.cache-toggle-btn {
+  flex-shrink: 0;
+  padding: 0.35rem 0.7rem;
+  font-size: 0.85rem;
+  border-radius: 6px;
+}
 .header-settings-link {
   flex-shrink: 0;
   font-size: 0.85rem;

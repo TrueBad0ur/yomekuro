@@ -5,10 +5,7 @@ import (
 	"net/http"
 )
 
-// no-store, not just no-cache: every JSON response here is scoped to the
-// caller's own session (book lists, progress, jobs, ...) — a shared proxy/CDN
-// in front of this server must never be allowed to cache and replay one
-// user's response to a different, possibly unauthenticated, request.
+// no-store: every JSON response here is scoped to the caller's own session.
 func respond(w http.ResponseWriter, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Cache-Control", "no-store")

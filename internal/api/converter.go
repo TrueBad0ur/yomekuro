@@ -60,22 +60,14 @@ func isHTMLFile(filename string) bool {
 	return ext == ".html" || ext == ".htm"
 }
 
-// An "unconverted" EPUB upload: a page-image scan someone already packaged as
-// an EPUB (e.g. from another tool) rather than a raw archive or PDF, with no
-// Yomitan-selectable OCR text layer yet. Handled like a single-volume archive:
-// its page images are pulled back out into a staging folder and queued for a
-// normal OCR conversion, same as any other fresh upload.
+// An "unconverted" EPUB upload: page images already packaged as an EPUB with
+// no OCR text layer yet — handled like a single-volume archive.
 func isEPUB(filename string) bool {
 	return strings.EqualFold(filepath.Ext(filename), ".epub")
 }
 
-// backupRawScan mirrors inDir's raw, pre-OCR page images/PDFs into
-// <backupDir>/<libraryName>/<name>/, preserving the same per-volume
-// subdirectory structure the raw scan itself already has — the same layout a
-// manually organized library on disk would use, not an EPUB or archive. A
-// destination already existing (e.g. this name was backed up before) is
-// removed first so the backup reflects the latest upload, not a stale mix of
-// two.
+// backupRawScan mirrors inDir's raw, pre-OCR content into <backupDir>/<libraryName>/<name>/,
+// replacing any prior backup under that name rather than mixing old and new.
 func backupRawScan(backupDir, libraryName, name, inDir string) error {
 	dest := filepath.Join(backupDir, libraryName, name)
 	if err := os.RemoveAll(dest); err != nil {
@@ -88,9 +80,7 @@ func backupRawScan(backupDir, libraryName, name, inDir string) error {
 	return nil
 }
 
-// copyDir recursively copies src into dst, creating dst if needed. Symlinks
-// are not followed specially — archive.Extract never produces them, so this
-// only needs to handle plain files and directories.
+// copyDir recursively copies src into dst, creating dst if needed.
 func copyDir(src, dst string) error {
 	return filepath.Walk(src, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
@@ -119,11 +109,8 @@ func copyDir(src, dst string) error {
 	})
 }
 
-// extractEPUBImages pulls the page images out of an EPUB (anything under an
-// "/images/" path in the zip, same convention this app's own converter uses)
-// into destDir, renumbered page-001.<ext>, page-002.<ext>, ... in page order —
-// not the original in-zip filenames, so the OCR pipeline's own page ordering
-// never depends on how the source EPUB happened to name its entries.
+// extractEPUBImages pulls page images out of an EPUB's "/images/" entries into
+// destDir, renumbered page-001.<ext>, page-002.<ext>, ... in page order.
 func extractEPUBImages(epubPath, destDir string) error {
 	zr, err := zip.OpenReader(epubPath)
 	if err != nil {
@@ -183,12 +170,8 @@ const (
 	epubTextMinJapaneseFraction = 0.3
 )
 
-// epubHasTextLayer tells an already-digitized EPUB (real, Yomitan-selectable
-// text baked into its own pages) from a "raw scan" upload that just wraps page
-// images with no text at all — same thresholds and reasoning as the
-// converter's own pdfHasTextLayer check for PDFs, applied to the EPUB's own
-// XHTML page markup instead of pdftotext output, so "does this already have
-// OCR" is judged consistently across both upload paths.
+// epubHasTextLayer tells an already-digitized EPUB from a raw-scan upload with
+// no text yet — same thresholds as converter/pdf.go's pdfHasTextLayer.
 func epubHasTextLayer(epubPath string) (bool, error) {
 	zr, err := zip.OpenReader(epubPath)
 	if err != nil {
@@ -239,9 +222,7 @@ func epubHasTextLayer(epubPath string) (bool, error) {
 	return float64(jaChars)/float64(chars) >= epubTextMinJapaneseFraction, nil
 }
 
-// Whether r is hiragana, katakana, kanji, or CJK/fullwidth punctuation —
-// mirrors converter/pdf.go's isJapanese (separate Go module, no shared
-// internal package to put this in instead).
+// Mirrors converter/pdf.go's isJapanese (separate module, no shared package).
 func isJapaneseRune(r rune) bool {
 	switch {
 	case r >= 0x3040 && r <= 0x30FF: // Hiragana + Katakana
@@ -297,9 +278,7 @@ func (s *Server) uploadArchive(w http.ResponseWriter, r *http.Request) {
 	}
 	defer file.Close()
 
-	// A standalone HTML file is already-finished content — no OCR, no archive,
-	// no conversion_jobs row, just a straight copy into the library. fsnotify
-	// picks it up and scans it in like any manually dropped-in .html file.
+	// Already-finished content — no OCR, straight copy, fsnotify scans it in.
 	if isHTMLFile(header.Filename) {
 		s.uploadHTMLFile(w, r, lib, file, header)
 		return
@@ -438,9 +417,7 @@ func (s *Server) uploadArchive(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if hasText {
-			// Already has real, Yomitan-selectable text — nothing to OCR. Place it
-			// directly as a finished volume; the next scan (or the library's own
-			// fsnotify watch) picks it up like any manually-dropped-in file.
+			// Already has real text — place as a finished volume, no OCR needed.
 			if err := os.MkdirAll(outDir, 0755); err != nil {
 				respondError(w, http.StatusInternalServerError, "cannot create book folder: "+err.Error())
 				return
@@ -454,9 +431,7 @@ func (s *Server) uploadArchive(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		// No usable text layer: treat it like a raw scan — pull its page images
-		// back out into a fresh volume folder and let it fall through to the
-		// normal OCR queue below, same as an image archive or PDF.
+		// No usable text layer: treat like a raw scan, fall through to OCR queue.
 		if err := extractEPUBImages(tmpEPUBPath, filepath.Join(stagingDir, volName)); err != nil {
 			respondError(w, http.StatusBadRequest, err.Error())
 			return
@@ -496,11 +471,7 @@ func (s *Server) uploadArchive(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Best-effort mirror of the raw, pre-OCR scan into the backup dir — a safety
-	// net independent of the conversion pipeline (OCR/reconvert can be redone
-	// from a raw scan, but a lost raw scan is gone for good). Never blocks or
-	// fails the upload: a full disk or missing mount here shouldn't stop
-	// conversion from proceeding.
+	// Best-effort backup mirror — never blocks or fails the upload.
 	if s.backupDir != "" {
 		if err := backupRawScan(s.backupDir, lib.Name, name, inDir); err != nil {
 			slog.Warn("backup raw scan failed", "name", name, "err", err)
@@ -517,9 +488,7 @@ func (s *Server) uploadArchive(w http.ResponseWriter, r *http.Request) {
 }
 
 // uploadHTMLFile copies a standalone HTML upload straight into the library
-// root — no staging, no conversion_jobs row, nothing to wait for. fsnotify's
-// existing watch on the library directory scans it in on its own, the same
-// path a manually-dropped-in .html file already takes.
+// root — no staging, no conversion_jobs row; fsnotify scans it in on its own.
 func (s *Server) uploadHTMLFile(w http.ResponseWriter, r *http.Request, lib db.Library, file multipart.File, header *multipart.FileHeader) {
 	name := r.FormValue("name")
 	if name == "" {
@@ -609,9 +578,7 @@ func (s *Server) listConversionJobs(w http.ResponseWriter, r *http.Request) {
 
 var volNumRe = regexp.MustCompile(`\d+`)
 
-// sortVolumeNames orders volume names by their last embedded number (e.g. "Volume
-// 2" before "Volume 10"), not lexicographically — plain string sort would put
-// "10" before "2". Falls back to a string compare when either name has none.
+// sortVolumeNames orders by last embedded number, not lexicographically.
 func sortVolumeNames(names []string) {
 	sort.Slice(names, func(i, j int) bool {
 		ni, oki := lastNumber(names[i])
@@ -627,9 +594,7 @@ func sortVolumeNames(names []string) {
 }
 
 func lastNumber(name string) (int, bool) {
-	// Real Japanese release filenames often use fullwidth digits (１２３, not
-	// 123) — \d only matches ASCII, so normalize first or these silently fall
-	// back to string sort, same gotcha noted for series numbering elsewhere.
+	// Fullwidth digits (１２３) don't match \d — normalize to ASCII first.
 	halfwidth := strings.Map(func(r rune) rune {
 		if r >= '０' && r <= '９' {
 			return r - '０' + '0'
@@ -654,15 +619,9 @@ type reconvertVolumeDTO struct {
 	NeedsReconvert bool   `json:"needs_reconvert,omitempty"`
 }
 
-// rawScanNewerThanEPUB reports whether any file or directory under the
-// volume's raw-scan folder was modified more recently than the built EPUB —
-// the signal that a page got hand-edited/reordered/replaced directly on disk
-// (as happens when fixing a scan's page order) after the last conversion, so
-// the EPUB is now stale even though nothing in the app itself ever
-// re-triggered OCR for it. Directory mtimes are checked too, not just file
-// mtimes: renaming files in place (the usual way to fix page order) leaves
-// each file's own mtime untouched, but updates its parent directory's mtime,
-// since the directory's entry listing itself changed.
+// rawScanNewerThanEPUB flags a hand-edited raw scan as stale even though OCR
+// never re-ran. Directory mtimes count too: renaming a file in place doesn't
+// touch its own mtime, but does touch its parent directory's.
 func rawScanNewerThanEPUB(volRawDir string, epubModTime time.Time) bool {
 	info, err := os.Stat(volRawDir)
 	if err != nil || !info.IsDir() {
@@ -685,9 +644,8 @@ func rawScanNewerThanEPUB(volRawDir string, epubModTime time.Time) bool {
 	return newer
 }
 
-// fileModTime returns a file's own mtime (RFC3339, UTC) — for a converter-produced
-// EPUB this is effectively "when it was last (re)analyzed", since nothing else in
-// this app ever rewrites a book's EPUB file after conversion.
+// fileModTime returns a file's mtime (RFC3339, UTC) — for a converter-produced
+// EPUB, effectively "last analyzed".
 func fileModTime(path string) string {
 	info, err := os.Stat(path)
 	if err != nil {
@@ -703,10 +661,8 @@ type reconvertCandidateDTO struct {
 	HasRawScan bool                 `json:"has_raw_scan"`
 }
 
-// epubHasImages reports whether a volume's EPUB has any page images at all —
-// false for a plain reflowable EPUB (ranobe/HTML: born-digital text, never had
-// page images to begin with), which is a different situation from a scanned
-// book whose raw source images are simply gone.
+// epubHasImages is false for a plain reflowable (born-digital) EPUB — distinct
+// from a scanned book whose raw source images are simply gone.
 func epubHasImages(path string) bool {
 	zr, err := zip.OpenReader(path)
 	if err != nil {
@@ -721,12 +677,8 @@ func epubHasImages(path string) bool {
 	return false
 }
 
-// listReconvertable scans a library's own subfolders for "<name>" output
-// folders — the converter job's actual unit of work — rather than going through
-// /api/series, whose grouping is driven by EPUB metadata and need not match the
-// on-disk folder name reconvert has to operate on. Every book with at least one
-// built volume is listed (so page images can always be pulled back out of its
-// EPUBs); HasRawScan additionally gates whether reconvert is actually possible.
+// listReconvertable scans on-disk "<name>" output folders directly, not
+// /api/series, since reconvert operates on folder names, not EPUB metadata.
 func (s *Server) listReconvertable(w http.ResponseWriter, r *http.Request) {
 	libID, ok := parseID(w, r.URL.Query().Get("library"))
 	if !ok {
@@ -779,9 +731,7 @@ func (s *Server) listReconvertable(w http.ResponseWriter, r *http.Request) {
 		items = append(items, reconvertCandidateDTO{Name: e.Name(), Kind: "epub", Volumes: volumes, HasRawScan: hasRawScan})
 	}
 
-	// HTML-library books are standalone ".html" files directly in the library
-	// root, not a "<name>/<volume>.epub" folder — never converted, never have a
-	// raw scan, and there's exactly one file per book, so no volume list at all.
+	// HTML-library books: one standalone .html file each, never converted.
 	for _, e := range entries {
 		if e.IsDir() {
 			continue
@@ -806,9 +756,8 @@ func (s *Server) listReconvertable(w http.ResponseWriter, r *http.Request) {
 	respond(w, map[string]any{"items": items})
 }
 
-// reconvertSeries queues a full OCR re-run over a book/series already in the
-// library, reusing the raw-scan "<name>-in" folder still on disk from its
-// original conversion — a cache-reuse rebuild wouldn't pick up OCR improvements.
+// reconvertSeries queues a full OCR re-run reusing the "<name>-in" raw scan
+// still on disk — a cache-reuse rebuild wouldn't pick up OCR improvements.
 func (s *Server) reconvertSeries(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		LibraryID    string `json:"library_id"`
@@ -820,12 +769,7 @@ func (s *Server) reconvertSeries(w http.ResponseWriter, r *http.Request) {
 		respondError(w, http.StatusBadRequest, "invalid JSON")
 		return
 	}
-	// Only these two are offered in the UI; anything else falls back to the
-	// standard size rather than letting an arbitrary value reach mokuro. 4096
-	// was tried and dropped — it OOMs mokuro's detector on this GPU's 8GB VRAM.
-	// 3584 ("Maximum") is an untested extrapolation between the measured 3072
-	// (~5.1GB peak) and the confirmed-OOM 4096 — offered as an opt-in for
-	// someone willing to try it, not validated on real hardware yet.
+	// Only these two are UI-offered; 4096 OOMs the detector on this GPU's 8GB VRAM.
 	detectorSize := 3072
 	if req.DetectorSize == 2048 || req.DetectorSize == 3584 {
 		detectorSize = req.DetectorSize
@@ -915,29 +859,16 @@ func (s *Server) deleteConversionJob(w http.ResponseWriter, r *http.Request) {
 		respondError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	// Only a job that never succeeded gets its input wiped — that's a disposable,
-	// half-finished staging dir unique to the failed attempt. A 'done' job's
-	// input_path is the book's real, shared "<name>-in" raw scan: once a book has
-	// successfully converted at least once, its own row (or a later reconvert
-	// row, which always has ForceOCR set) can point at that same shared path, so
-	// deleting a leftover 'done' row must never delete it out from under
-	// whatever else — a live reconvert included — is relying on it still being
-	// there. Hit exactly this: deleting an old finished job mid-reconvert wiped
-	// the folder mokuro was actively reading from. 'paused' gets the same
-	// protection for the same reason pause exists at all: its whole point is
-	// that resuming later finds every file exactly where it was — removing the
-	// row (e.g. to clear it from the list) must never wipe the raw scan
-	// underneath a book someone still intends to finish converting.
+	// Only a never-succeeded job's input is disposable; wiping a 'done'/'paused'
+	// job's shared raw scan has deleted a folder a live reconvert was reading.
 	if inputPath != "" && !j.ForceOCR && j.Status != "done" && j.Status != "paused" {
 		os.RemoveAll(inputPath)
 	}
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// pauseQueue pauses every queued job except whichever one is actively
-// converting right now — unlike Stop, this never touches any file, so the
-// whole queue (all but the one live job) can be paused for hours to let the
-// host cool down and picked back up exactly where it left off.
+// pauseQueue pauses every queued job except the one actively converting —
+// unlike Stop, this never touches any file.
 func (s *Server) pauseQueue(w http.ResponseWriter, r *http.Request) {
 	n, err := db.PauseQueue(r.Context(), s.db)
 	if err != nil {
@@ -956,10 +887,8 @@ func (s *Server) resumeQueue(w http.ResponseWriter, r *http.Request) {
 	respond(w, map[string]any{"affected": n})
 }
 
-// extractVolumeImages re-derives a raw page-image archive from an already-built
-// volume's EPUB — useful when the original "-in" scan is gone (deleted, or never
-// kept) but someone needs the page images back, e.g. to test the upload flow
-// without re-sourcing the original scan.
+// extractVolumeImages re-derives raw page images from a built EPUB — useful
+// when the original "-in" scan is gone.
 func (s *Server) extractVolumeImages(w http.ResponseWriter, r *http.Request) {
 	libID, ok := parseID(w, r.URL.Query().Get("library"))
 	if !ok {
@@ -1094,11 +1023,8 @@ func (s *Server) extractVolumeImages(w http.ResponseWriter, r *http.Request) {
 	w.Write(buildImagesPDF(pages))
 }
 
-// deleteBook removes a book from the library entirely: its output folder (all
-// volumes' EPUBs) and, if present, its raw-scan "<name>-in" folder — a
-// permanent, disk-level delete, not just a DB row removal. Refuses while a
-// conversion job is queued or running for this name, since deleting files out
-// from under a live mokuro process would corrupt or crash it.
+// deleteBook permanently removes a book's output and raw-scan folders. Refuses
+// while a conversion job is queued/running for this name.
 func (s *Server) deleteBook(w http.ResponseWriter, r *http.Request) {
 	libID, ok := parseID(w, r.URL.Query().Get("library"))
 	if !ok {
@@ -1185,14 +1111,8 @@ func (s *Server) deleteBook(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// renameBook sets a display-name override for the library page's series
-// grouping — it only rewrites books.series_name in the DB, never the file on
-// disk or the "<name>"/"<name>-in" folders those files still live under (which
-// keep using the original name everywhere else: reconvert, download, delete).
-// This is the only way to change what a manga/PDF-derived book shows as, since
-// its series name is otherwise baked into each volume's own EPUB OPF metadata
-// at conversion time; for ranobe/HTML books (whose series comes from the
-// parent-folder fallback) it works the same way for consistency.
+// renameBook overrides books.series_name in the DB only — never the file or
+// folders, which keep their original name everywhere else.
 func (s *Server) renameBook(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		LibraryID   string `json:"library_id"`

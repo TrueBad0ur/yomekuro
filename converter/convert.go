@@ -32,11 +32,8 @@ func acquireGPU(ctx context.Context) error {
 
 func releaseGPU() { <-gpuSem }
 
-// DefaultDetectorSize is the text-detector's input resolution used unless a
-// job (or the CLI) asks for something else. 3072 (not mokuro's own 1024, nor
-// this app's earlier 2048 default) is the confirmed-real-improvement setting
-// from testing on real production scans — see CLAUDE.md's OCR-quality notes —
-// 2048 remains available as a faster/lower-VRAM opt-out, not the default.
+// DefaultDetectorSize is the text-detector's input resolution unless a job (or
+// the CLI) asks for something else — see CLAUDE.md's OCR-quality notes.
 const DefaultDetectorSize = 3072
 
 // Convert OCRs input (volume subdirs, or one flat image folder) into one EPUB
@@ -46,11 +43,8 @@ func Convert(ctx context.Context, input, output, volume string, noCache bool, de
 		return 0, 0, fmt.Errorf("create output dir: %w", err)
 	}
 
-	// Decided upfront: later steps restructure the directory, so deciding this
-	// incrementally could change the answer partway through a batch. Always from
-	// every candidate name in input, even when volume narrows the actual OCR run
-	// to one of them — otherwise a single-volume reconvert would see itself as
-	// the only volume and get treated as its own standalone one-book series.
+	// Always from every candidate name, even when volume narrows the OCR run to
+	// one of them — else a single-volume reconvert looks like its own series.
 	names, err := candidateVolumeNames(input)
 	if err != nil {
 		return 0, 0, fmt.Errorf("read input dir: %w", err)
@@ -124,14 +118,10 @@ func Convert(ctx context.Context, input, output, volume string, noCache bool, de
 	}
 	defer releaseGPU()
 
-	// A reconvert's ".mokuro" files from the *previous* run are already sitting on
-	// disk when this starts — snapshot their mtimes first so the poll loop can tell
-	// "mokuro actually rewrote this volume" from "this is stale leftover content
-	// nothing has touched yet". Without this, the very first poll tick (2s in, long
-	// before mokuro finishes reprocessing even one volume) would see every old file
-	// as "new" and build every volume's EPUB from stale, pre-reconvert OCR data —
-	// then never rebuild it again once mokuro *does* rewrite that file later in the
-	// same run, because the old name-only "built" tracking had already marked it done.
+	reconcileOCRCache(mokuroDir)
+
+	// Snapshot pre-existing ".mokuro" mtimes first, so the poll loop can tell a
+	// genuine rewrite from stale leftover content from the previous run.
 	builtMTime := snapshotMokuroMTimes(mokuroDir)
 
 	mokuroErrCh := make(chan error, 1)
@@ -164,9 +154,8 @@ pollLoop:
 	return ok, fail, nil
 }
 
-// snapshotMokuroMTimes records the current mtime of every ".mokuro" file already
-// in dir, so buildEPUBsForNewMokuroFiles can tell an untouched leftover from one
-// mokuro has genuinely (re)written during this run.
+// snapshotMokuroMTimes lets buildEPUBsForNewMokuroFiles tell an untouched
+// leftover from a genuine rewrite.
 func snapshotMokuroMTimes(dir string) map[string]time.Time {
 	m := map[string]time.Time{}
 	entries, err := os.ReadDir(dir)
@@ -184,10 +173,8 @@ func snapshotMokuroMTimes(dir string) map[string]time.Time {
 	return m
 }
 
-// Builds an EPUB for each ".mokuro" whose mtime has changed since builtMTime was
-// last recorded for it (or that isn't in builtMTime at all), then records the new
-// mtime either way (a failed build isn't retried until the file changes again).
-// Non-empty series overrides the derived one.
+// Builds an EPUB for each ".mokuro" whose mtime changed since builtMTime was
+// last recorded, then updates it either way. Non-empty series overrides the derived one.
 func buildEPUBsForNewMokuroFiles(mokuroDir, volumesBaseDir, output string, builtMTime map[string]time.Time, series string, seriesIndex map[string]float64) (ok, fail int) {
 	entries, err := os.ReadDir(mokuroDir)
 	if err != nil {
@@ -251,11 +238,8 @@ func candidateVolumeNames(input string) ([]string, error) {
 	return names, nil
 }
 
-// Groups a job's volumes into a series under the job's output name — the
-// name the user gave at upload time (or, for a reconvert, the book's
-// existing folder name) always wins over whatever the archive's own
-// internal volume names happen to be, so a Japanese upload name doesn't get
-// silently replaced by an English/romaji release-group naming pattern.
+// Groups a job's volumes into a series under output's name — always wins over
+// the archive's own internal volume names.
 func decideSeries(names []string, output string) (series string, seriesIndex map[string]float64) {
 	if len(names) == 0 {
 		// Flat single volume — matches the naming already used for it

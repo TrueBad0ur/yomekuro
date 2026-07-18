@@ -36,10 +36,8 @@ var (
 // thumbnail — plenty for a handful of wrapped preview lines, cheap to store.
 const excerptRunes = 400
 
-// extractExcerpt strips tags/scripts/styles from the body and collapses
-// whitespace, for the text-card cover — deliberately regex-based, not a real
-// HTML parser, same rationale as the rest of this package: a dropped-in file
-// isn't guaranteed to be well-formed XHTML.
+// extractExcerpt strips tags/scripts/styles and collapses whitespace for the
+// text-card cover — regex-based, not a real parser, same as the rest of this package.
 func extractExcerpt(content string) string {
 	body := content
 	if m := bodyRe.FindStringSubmatch(content); m != nil {

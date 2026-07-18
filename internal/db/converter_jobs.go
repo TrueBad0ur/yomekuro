@@ -36,12 +36,8 @@ func CreateConversionJob(ctx context.Context, pool *pgxpool.Pool, libraryID [16]
 	return j, err
 }
 
-// CreateReconvertJob queues a full OCR re-run over an existing book's already-staged
-// input/output dirs — unlike a fresh upload, mokuro's cache is bypassed entirely.
-// An empty volume reconverts every volume in the book; a non-empty one limits the
-// run to just that volume (matching the epub's basename in the output dir).
-// detectorSize is the text-detector's input resolution — the caller (API layer)
-// validates it against the fixed set of choices offered in the UI.
+// CreateReconvertJob queues a full OCR re-run, bypassing mokuro's cache. An
+// empty volume reconverts the whole book; non-empty limits it to one volume.
 func CreateReconvertJob(ctx context.Context, pool *pgxpool.Pool, libraryID [16]byte, name, inputPath, outputPath, volume string, detectorSize int) (ConversionJob, error) {
 	var j ConversionJob
 	err := pool.QueryRow(ctx,
@@ -103,13 +99,8 @@ func RequestStopConversionJob(ctx context.Context, pool *pgxpool.Pool, id [16]by
 	return err
 }
 
-// PauseQueue pauses every queued job except whichever one is actively running
-// right now (non-empty current_volume, i.e. mokuro is genuinely mid-page on
-// it) — a still-'pending' job pauses instantly since nothing has claimed it
-// yet; an already-claimed 'running' job gets pause_requested set so its own
-// goroutine notices within one poll tick and stops cleanly. Unlike Stop, this
-// never deletes input/output files regardless of how much (or how little)
-// had converted — resuming just flips status back to 'pending'.
+// PauseQueue pauses every job except one actively mid-volume right now. Unlike
+// Stop, this never deletes files — resuming flips status back to 'pending'.
 func PauseQueue(ctx context.Context, pool *pgxpool.Pool) (int64, error) {
 	pending, err := pool.Exec(ctx,
 		`UPDATE conversion_jobs SET status='paused', updated_at=NOW() WHERE status='pending'`)
@@ -125,9 +116,8 @@ func PauseQueue(ctx context.Context, pool *pgxpool.Pool) (int64, error) {
 	return pending.RowsAffected() + running.RowsAffected(), nil
 }
 
-// ResumeQueue flips every paused job back to 'pending' so the worker's normal
-// poll loop claims each one again — the same mechanism reclaimOrphanedJobs
-// already uses for a worker that died mid-job.
+// ResumeQueue flips every paused job back to 'pending' for the worker's
+// normal poll loop to reclaim, same as reclaimOrphanedJobs.
 func ResumeQueue(ctx context.Context, pool *pgxpool.Pool) (int64, error) {
 	tag, err := pool.Exec(ctx,
 		`UPDATE conversion_jobs SET status='pending', pause_requested=false, current_volume='', updated_at=NOW()

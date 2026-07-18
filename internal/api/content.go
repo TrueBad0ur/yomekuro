@@ -217,8 +217,12 @@ func (s *Server) getBookContent(w http.ResponseWriter, r *http.Request) {
 	if b.Format == "html" {
 		w.Header().Set("Content-Type", mimeByExt(entryPath))
 		w.Header().Set("ETag", etag)
-		// private: same reasoning as below — never let a shared proxy cache this.
-		w.Header().Set("Cache-Control", "private, no-cache")
+		// max-age, not no-cache: the ETag (keyed on FileHash) already changes
+		// whenever the file changes, so a real cache lifetime is safe — the
+		// reader's cache-mode toggle uses a cache-busting query string instead
+		// of forcing revalidation here, so "cache on" browsing can skip the
+		// network entirely, not just get a cheap 304 on every page turn.
+		w.Header().Set("Cache-Control", "private, max-age=604800")
 		http.ServeFile(w, r, b.Path)
 		return
 	}
@@ -251,12 +255,9 @@ func (s *Server) getBookContent(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", mimeByExt(entryPath))
 	w.Header().Set("ETag", etag)
-	// no-cache = always revalidate via ETag. Content can change on re-convert;
-	// the hash-based ETag makes revalidation cheap (304) while never serving stale
-	// pages. private: this is a specific user's book content — a shared proxy/CDN
-	// must never cache and replay it to a different (possibly unauthenticated)
-	// requester behind the same cache.
-	w.Header().Set("Cache-Control", "private, no-cache")
+	// max-age, not no-cache — see the html branch above for why. private: a
+	// shared proxy/CDN must never replay this to another requester.
+	w.Header().Set("Cache-Control", "private, max-age=604800")
 	io.Copy(w, rc)
 }
 

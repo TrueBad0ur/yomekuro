@@ -3,6 +3,19 @@
 const bookId = new URLSearchParams(location.search).get('id');
 if (!bookId) location.href = '/';
 
+// Shared with app.js's toggle (same localStorage key) — 'off' cache-busts every
+// content/image URL instead of relying on the server's max-age, e.g. right
+// after a reconvert when you want the new pages, not whatever's cached.
+function getCacheMode() {
+  return localStorage.getItem('cacheMode') || 'on';
+}
+function cacheBust(url) {
+  if (getCacheMode() === 'off') {
+    return url + (url.includes('?') ? '&' : '?') + '_nc=' + Date.now();
+  }
+  return url;
+}
+
 // ── State ─────────────────────────────────────────────────────────────────────
 
 let manifest = null;
@@ -358,8 +371,7 @@ async function loadChapter(index, restoreScroll) {
   const item = manifest.spine[index];
   let text;
   try {
-    // no-store: content changes when a book is re-converted; never serve a stale page from HTTP cache
-    const res = await fetch(`/api/books/${bookId}/content/${item.href}`, { cache: 'no-store' });
+    const res = await fetch(cacheBust(`/api/books/${bookId}/content/${item.href}`));
     text = await res.text();
   } catch {
     content.innerHTML = '<p style="padding:2rem;color:#888">Failed to load chapter.</p>';
@@ -394,7 +406,7 @@ async function loadChapter(index, restoreScroll) {
     if (effectiveSpread() && !isFusedSpreadPage(fixedDoc) && spineIndex + 1 < manifest.spine.length) {
       const item2 = manifest.spine[spineIndex + 1];
       try {
-        const res2 = await fetch(`/api/books/${bookId}/content/${item2.href}`, { cache: 'no-store' });
+        const res2 = await fetch(cacheBust(`/api/books/${bookId}/content/${item2.href}`));
         const text2 = await res2.text();
         const parser2 = new DOMParser();
         let doc2 = parser2.parseFromString(text2, 'application/xhtml+xml');
@@ -448,20 +460,20 @@ function resolveURL(chapterBase, rel) {
 function rewriteNodes(root, chapterBase) {
   root.querySelectorAll('script').forEach(el => el.remove());
   root.querySelectorAll('img[src]').forEach(el => {
-    el.setAttribute('src', resolveURL(chapterBase, el.getAttribute('src')));
+    el.setAttribute('src', cacheBust(resolveURL(chapterBase, el.getAttribute('src'))));
   });
   root.querySelectorAll('image').forEach(el => {
     const href = el.getAttribute('href') || el.getAttribute('xlink:href');
-    if (href) el.setAttribute('href', resolveURL(chapterBase, href));
+    if (href) el.setAttribute('href', cacheBust(resolveURL(chapterBase, href)));
   });
   root.querySelectorAll('source[src]').forEach(el => {
-    el.setAttribute('src', resolveURL(chapterBase, el.getAttribute('src')));
+    el.setAttribute('src', cacheBust(resolveURL(chapterBase, el.getAttribute('src'))));
   });
   root.querySelectorAll('[style]').forEach(el => {
     el.setAttribute('style',
       el.getAttribute('style').replace(
         /url\(['"]?([^'")]+)['"]?\)/g,
-        (_, u) => `url(${resolveURL(chapterBase, u)})`
+        (_, u) => `url(${cacheBust(resolveURL(chapterBase, u))})`
       )
     );
   });
@@ -475,7 +487,7 @@ function applyEpubStyles(doc, chapterBase) {
     const el = document.createElement('link');
     el.rel = 'stylesheet';
     el.className = 'epub-style';
-    el.href = resolveURL(chapterBase, href);
+    el.href = cacheBust(resolveURL(chapterBase, href));
     document.head.appendChild(el);
   });
   doc.querySelectorAll('style').forEach(style => {
@@ -579,7 +591,7 @@ function buildPageWrapper(bodyDiv, chapterBase, pw, ph, totalScale, left, halfIn
     if (tag === 'img') {
       const img = document.createElement('img');
       img.style.cssText = 'position:absolute;top:0;left:0;width:100%;height:100%;display:block;';
-      img.src = resolveURL(chapterBase, child.getAttribute('src') || '');
+      img.src = cacheBust(resolveURL(chapterBase, child.getAttribute('src') || ''));
       img.alt = child.getAttribute('alt') || '';
       inner.appendChild(img);
     } else {

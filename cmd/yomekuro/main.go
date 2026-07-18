@@ -45,10 +45,8 @@ func main() {
 		slog.Warn("YOMEKURO_ADMIN_PASSWORD not set — admin will not be created automatically")
 	}
 
-	// Both live under one /library mount, one subfolder each. "Books" absorbs
-	// what used to be three separate libraries (Ranobe/HTML/PDF) — the format
-	// (epub vs html) and origin (scan vs digital) were never really a useful
-	// split for browsing, they're both just "not manga".
+	// "Books" absorbs the former Ranobe/HTML/PDF split — never a useful
+	// distinction for browsing, they're both just "not manga".
 	for _, def := range []struct{ name, path string }{
 		{"Books", "/library/books"},
 		{"Manga", "/library/manga"},

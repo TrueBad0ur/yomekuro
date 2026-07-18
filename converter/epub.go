@@ -114,9 +114,14 @@ func buildEPUB(vol MokuroVolume, inputDir, outPath string) error {
 		imgSrc := filepath.Join(inputDir, vol.Volume, filepath.FromSlash(page.ImgPath))
 		ext := strings.ToLower(filepath.Ext(page.ImgPath))
 		mt := extMediaType(ext)
-		destHref := fmt.Sprintf("images/%s", url.PathEscape(filepath.Base(page.ImgPath)))
+		// Zip entry name must stay the raw filename — only the OPF/XHTML href
+		// reference needs URL-escaping, or a space (etc.) in the source
+		// filename makes the zip entry and the decoded href disagree, and
+		// nothing (including cover extraction) can find the file again.
+		destName := "images/" + filepath.Base(page.ImgPath)
+		destHref := "images/" + url.PathEscape(filepath.Base(page.ImgPath))
 
-		if err := addFile(zw, "OPS/"+destHref, imgSrc); err != nil {
+		if err := addFile(zw, "OPS/"+destName, imgSrc); err != nil {
 			return fmt.Errorf("page %d image: %w", i+1, err)
 		}
 		images = append(images, imgEntry{
@@ -154,12 +159,8 @@ func containerXML() string {
 </container>`
 }
 
-// volumeDirection infers page-progression-direction from mokuro's own per-block
-// vertical/horizontal detection instead of assuming manga's usual right-to-left:
-// traditional manga is vertical text, bound right-to-left, but children's graded
-// readers and western-style-digitized PDFs are predominantly horizontal text,
-// bound left-to-right. Counts characters rather than blocks so one short vertical
-// caption on an otherwise-horizontal page doesn't flip the whole volume.
+// volumeDirection infers RTL/LTR from mokuro's per-block text orientation,
+// counting characters (not blocks) so one caption doesn't flip the volume.
 func volumeDirection(vol MokuroVolume) string {
 	var vertChars, horizChars int
 	for _, page := range vol.Pages {
