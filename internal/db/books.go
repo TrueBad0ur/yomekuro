@@ -276,3 +276,23 @@ func DeleteBookByPath(ctx context.Context, pool *pgxpool.Pool, path string) erro
 	_, err := pool.Exec(ctx, `DELETE FROM books WHERE path = $1`, path)
 	return err
 }
+
+// RenameSeriesUnderPath sets series_name for every book at pathOrDir itself
+// (a standalone HTML file) or anywhere under it (a "<name>/<volume>.epub"
+// folder) — an admin-only display-name override for the library page. It only
+// touches the DB, never the file on disk: the scanner's cheap mtime+size skip
+// means an unchanged file is never re-scanned, so this survives future scans
+// as long as the underlying file itself isn't reconverted or re-uploaded.
+func RenameSeriesUnderPath(ctx context.Context, pool *pgxpool.Pool, libraryID [16]byte, pathOrDir, newName string) (int64, error) {
+	// Exact prefix comparison, not LIKE — a book name containing a literal "%"
+	// or "_" would otherwise be interpreted as a SQL wildcard.
+	tag, err := pool.Exec(ctx,
+		`UPDATE books SET series_name = $1, updated_at = NOW()
+		 WHERE library_id = $2 AND (path = $3 OR left(path, length($3) + 1) = $3 || '/')`,
+		newName, libraryID, pathOrDir,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return tag.RowsAffected(), nil
+}

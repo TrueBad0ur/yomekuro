@@ -251,8 +251,11 @@ func candidateVolumeNames(input string) ([]string, error) {
 	return names, nil
 }
 
-// Groups a job's volumes into a series: names sharing a "Name vNN" pattern keep
-// their own (returns ""); an anthology is grouped under the job's output name.
+// Groups a job's volumes into a series under the job's output name — the
+// name the user gave at upload time (or, for a reconvert, the book's
+// existing folder name) always wins over whatever the archive's own
+// internal volume names happen to be, so a Japanese upload name doesn't get
+// silently replaced by an English/romaji release-group naming pattern.
 func decideSeries(names []string, output string) (series string, seriesIndex map[string]float64) {
 	if len(names) == 0 {
 		// Flat single volume — matches the naming already used for it
@@ -261,23 +264,6 @@ func decideSeries(names []string, output string) (series string, seriesIndex map
 	}
 	sorted := append([]string(nil), names...)
 	sort.Strings(sorted)
-
-	shared := seriesName(sorted[0])
-	agree := shared != sorted[0] || len(sorted) == 1
-	for _, n := range sorted[1:] {
-		if s := seriesName(n); s != shared || s == n {
-			agree = false
-			break
-		}
-	}
-	// One new volume landing in a folder that already holds EPUBs joins that
-	// series whatever its filename says — it's already a fact on disk.
-	if agree && len(sorted) == 1 && hasExistingEPUBs(output) {
-		agree = false
-	}
-	if agree {
-		return "", nil
-	}
 
 	seriesIndex = make(map[string]float64, len(names))
 	for i, n := range sorted {
@@ -288,13 +274,6 @@ func decideSeries(names []string, output string) (series string, seriesIndex map
 		}
 	}
 	return filepath.Base(output), seriesIndex
-}
-
-// hasExistingEPUBs reports whether output already contains at least one
-// ".epub" file.
-func hasExistingEPUBs(output string) bool {
-	matches, _ := filepath.Glob(filepath.Join(output, "*.epub"))
-	return len(matches) > 0
 }
 
 // Whether dir holds page images directly (one volume) rather than a subdir per

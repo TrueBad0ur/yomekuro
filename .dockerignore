@@ -2,4 +2,9 @@
 data/
 library/
 html-library/
+backup/
+docs/
 .env
+# separate Go module (its own go.mod) — never imported by cmd/yomekuro,
+# and its own data/ cache + compiled binary are large runtime artifacts
+converter/

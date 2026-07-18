@@ -76,10 +76,11 @@ CREATE TABLE conversion_jobs (
     name        TEXT NOT NULL,
     input_path  TEXT NOT NULL,
     output_path TEXT NOT NULL,
-    status      TEXT NOT NULL DEFAULT 'pending', -- pending | running | done | failed | stopped
+    status      TEXT NOT NULL DEFAULT 'pending', -- pending | running | done | failed | stopped | paused
     error       TEXT NOT NULL DEFAULT '',
     current_volume TEXT NOT NULL DEFAULT '',
     stop_requested BOOLEAN NOT NULL DEFAULT false,
+    pause_requested BOOLEAN NOT NULL DEFAULT false, -- like stop_requested, but never wipes input/output on cancel
     force_ocr   BOOLEAN NOT NULL DEFAULT false, -- reconvert: full OCR re-run, ignoring mokuro's cache
     volume      TEXT NOT NULL DEFAULT '', -- reconvert: limit to one volume; '' means the whole book
     detector_size INTEGER NOT NULL DEFAULT 3072, -- text-detector input resolution (px); higher = slower, fewer merged-line misreads

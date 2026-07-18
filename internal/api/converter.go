@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"mime/multipart"
 	"net/http"
 	"os"
@@ -66,6 +67,56 @@ func isHTMLFile(filename string) bool {
 // normal OCR conversion, same as any other fresh upload.
 func isEPUB(filename string) bool {
 	return strings.EqualFold(filepath.Ext(filename), ".epub")
+}
+
+// backupRawScan mirrors inDir's raw, pre-OCR page images/PDFs into
+// <backupDir>/<libraryName>/<name>/, preserving the same per-volume
+// subdirectory structure the raw scan itself already has — the same layout a
+// manually organized library on disk would use, not an EPUB or archive. A
+// destination already existing (e.g. this name was backed up before) is
+// removed first so the backup reflects the latest upload, not a stale mix of
+// two.
+func backupRawScan(backupDir, libraryName, name, inDir string) error {
+	dest := filepath.Join(backupDir, libraryName, name)
+	if err := os.RemoveAll(dest); err != nil {
+		return fmt.Errorf("backup: clear old copy: %w", err)
+	}
+	if err := copyDir(inDir, dest); err != nil {
+		os.RemoveAll(dest)
+		return fmt.Errorf("backup: copy: %w", err)
+	}
+	return nil
+}
+
+// copyDir recursively copies src into dst, creating dst if needed. Symlinks
+// are not followed specially — archive.Extract never produces them, so this
+// only needs to handle plain files and directories.
+func copyDir(src, dst string) error {
+	return filepath.Walk(src, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		rel, err := filepath.Rel(src, path)
+		if err != nil {
+			return err
+		}
+		target := filepath.Join(dst, rel)
+		if info.IsDir() {
+			return os.MkdirAll(target, 0755)
+		}
+		in, err := os.Open(path)
+		if err != nil {
+			return err
+		}
+		defer in.Close()
+		out, err := os.Create(target)
+		if err != nil {
+			return err
+		}
+		defer out.Close()
+		_, err = io.Copy(out, in)
+		return err
+	})
 }
 
 // extractEPUBImages pulls the page images out of an EPUB (anything under an
@@ -445,6 +496,17 @@ func (s *Server) uploadArchive(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Best-effort mirror of the raw, pre-OCR scan into the backup dir — a safety
+	// net independent of the conversion pipeline (OCR/reconvert can be redone
+	// from a raw scan, but a lost raw scan is gone for good). Never blocks or
+	// fails the upload: a full disk or missing mount here shouldn't stop
+	// conversion from proceeding.
+	if s.backupDir != "" {
+		if err := backupRawScan(s.backupDir, lib.Name, name, inDir); err != nil {
+			slog.Warn("backup raw scan failed", "name", name, "err", err)
+		}
+	}
+
 	if _, err := db.CreateConversionJob(r.Context(), s.db, libID, name, inDir, outDir); err != nil {
 		respondError(w, http.StatusInternalServerError, "cannot queue job: "+err.Error())
 		return
@@ -586,9 +648,41 @@ func lastNumber(name string) (int, bool) {
 }
 
 type reconvertVolumeDTO struct {
-	Name       string `json:"name"`
-	HasImages  bool   `json:"has_images"`
-	ModifiedAt string `json:"modified_at,omitempty"`
+	Name           string `json:"name"`
+	HasImages      bool   `json:"has_images"`
+	ModifiedAt     string `json:"modified_at,omitempty"`
+	NeedsReconvert bool   `json:"needs_reconvert,omitempty"`
+}
+
+// rawScanNewerThanEPUB reports whether any file or directory under the
+// volume's raw-scan folder was modified more recently than the built EPUB —
+// the signal that a page got hand-edited/reordered/replaced directly on disk
+// (as happens when fixing a scan's page order) after the last conversion, so
+// the EPUB is now stale even though nothing in the app itself ever
+// re-triggered OCR for it. Directory mtimes are checked too, not just file
+// mtimes: renaming files in place (the usual way to fix page order) leaves
+// each file's own mtime untouched, but updates its parent directory's mtime,
+// since the directory's entry listing itself changed.
+func rawScanNewerThanEPUB(volRawDir string, epubModTime time.Time) bool {
+	info, err := os.Stat(volRawDir)
+	if err != nil || !info.IsDir() {
+		return false
+	}
+	newer := false
+	filepath.WalkDir(volRawDir, func(path string, d os.DirEntry, err error) error {
+		if err != nil || newer {
+			return nil
+		}
+		fi, err := d.Info()
+		if err != nil {
+			return nil
+		}
+		if fi.ModTime().After(epubModTime) {
+			newer = true
+		}
+		return nil
+	})
+	return newer
 }
 
 // fileModTime returns a file's own mtime (RFC3339, UTC) — for a converter-produced
@@ -667,14 +761,20 @@ func (s *Server) listReconvertable(w http.ResponseWriter, r *http.Request) {
 			byName[n] = ep
 		}
 		sortVolumeNames(names)
-		volumes := make([]reconvertVolumeDTO, len(names))
-		for i, n := range names {
-			volumes[i] = reconvertVolumeDTO{Name: n, HasImages: epubHasImages(byName[n]), ModifiedAt: fileModTime(byName[n])}
-		}
 		inDir := filepath.Join(lib.Path, e.Name()+"-in")
 		hasRawScan := false
 		if info, err := os.Stat(inDir); err == nil && info.IsDir() {
 			hasRawScan = true
+		}
+		volumes := make([]reconvertVolumeDTO, len(names))
+		for i, n := range names {
+			needsReconvert := false
+			if hasRawScan {
+				if epubInfo, err := os.Stat(byName[n]); err == nil {
+					needsReconvert = rawScanNewerThanEPUB(filepath.Join(inDir, n), epubInfo.ModTime())
+				}
+			}
+			volumes[i] = reconvertVolumeDTO{Name: n, HasImages: epubHasImages(byName[n]), ModifiedAt: fileModTime(byName[n]), NeedsReconvert: needsReconvert}
 		}
 		items = append(items, reconvertCandidateDTO{Name: e.Name(), Kind: "epub", Volumes: volumes, HasRawScan: hasRawScan})
 	}
@@ -723,9 +823,12 @@ func (s *Server) reconvertSeries(w http.ResponseWriter, r *http.Request) {
 	// Only these two are offered in the UI; anything else falls back to the
 	// standard size rather than letting an arbitrary value reach mokuro. 4096
 	// was tried and dropped — it OOMs mokuro's detector on this GPU's 8GB VRAM.
+	// 3584 ("Maximum") is an untested extrapolation between the measured 3072
+	// (~5.1GB peak) and the confirmed-OOM 4096 — offered as an opt-in for
+	// someone willing to try it, not validated on real hardware yet.
 	detectorSize := 3072
-	if req.DetectorSize == 2048 {
-		detectorSize = 2048
+	if req.DetectorSize == 2048 || req.DetectorSize == 3584 {
+		detectorSize = req.DetectorSize
 	}
 	libID, ok := parseID(w, req.LibraryID)
 	if !ok {
@@ -820,11 +923,37 @@ func (s *Server) deleteConversionJob(w http.ResponseWriter, r *http.Request) {
 	// deleting a leftover 'done' row must never delete it out from under
 	// whatever else — a live reconvert included — is relying on it still being
 	// there. Hit exactly this: deleting an old finished job mid-reconvert wiped
-	// the folder mokuro was actively reading from.
-	if inputPath != "" && !j.ForceOCR && j.Status != "done" {
+	// the folder mokuro was actively reading from. 'paused' gets the same
+	// protection for the same reason pause exists at all: its whole point is
+	// that resuming later finds every file exactly where it was — removing the
+	// row (e.g. to clear it from the list) must never wipe the raw scan
+	// underneath a book someone still intends to finish converting.
+	if inputPath != "" && !j.ForceOCR && j.Status != "done" && j.Status != "paused" {
 		os.RemoveAll(inputPath)
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// pauseQueue pauses every queued job except whichever one is actively
+// converting right now — unlike Stop, this never touches any file, so the
+// whole queue (all but the one live job) can be paused for hours to let the
+// host cool down and picked back up exactly where it left off.
+func (s *Server) pauseQueue(w http.ResponseWriter, r *http.Request) {
+	n, err := db.PauseQueue(r.Context(), s.db)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	respond(w, map[string]any{"affected": n})
+}
+
+func (s *Server) resumeQueue(w http.ResponseWriter, r *http.Request) {
+	n, err := db.ResumeQueue(r.Context(), s.db)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	respond(w, map[string]any{"affected": n})
 }
 
 // extractVolumeImages re-derives a raw page-image archive from an already-built
@@ -1054,4 +1183,67 @@ func (s *Server) deleteBook(w http.ResponseWriter, r *http.Request) {
 	os.RemoveAll(inDir)
 
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// renameBook sets a display-name override for the library page's series
+// grouping — it only rewrites books.series_name in the DB, never the file on
+// disk or the "<name>"/"<name>-in" folders those files still live under (which
+// keep using the original name everywhere else: reconvert, download, delete).
+// This is the only way to change what a manga/PDF-derived book shows as, since
+// its series name is otherwise baked into each volume's own EPUB OPF metadata
+// at conversion time; for ranobe/HTML books (whose series comes from the
+// parent-folder fallback) it works the same way for consistency.
+func (s *Server) renameBook(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		LibraryID   string `json:"library_id"`
+		Name        string `json:"name"`
+		Kind        string `json:"kind"`
+		DisplayName string `json:"display_name"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		respondError(w, http.StatusBadRequest, "invalid JSON")
+		return
+	}
+	libID, ok := parseID(w, req.LibraryID)
+	if !ok {
+		return
+	}
+	lib, err := db.GetLibraryByID(r.Context(), s.db, libID)
+	if err != nil {
+		respondError(w, http.StatusNotFound, "library not found")
+		return
+	}
+	name, err := sanitizeName(req.Name)
+	if err != nil {
+		respondError(w, http.StatusBadRequest, "invalid name")
+		return
+	}
+	displayName := strings.TrimSpace(req.DisplayName)
+	if displayName == "" {
+		respondError(w, http.StatusBadRequest, "display name cannot be empty")
+		return
+	}
+
+	pathOrDir := filepath.Join(lib.Path, name)
+	if req.Kind == "html" {
+		pathOrDir = filepath.Join(lib.Path, name+".html")
+		if _, err := os.Stat(pathOrDir); err != nil {
+			pathOrDir = filepath.Join(lib.Path, name+".htm")
+		}
+	} else if info, err := os.Stat(pathOrDir); err != nil || !info.IsDir() {
+		respondError(w, http.StatusNotFound, "book not found in this library")
+		return
+	}
+
+	n, err := db.RenameSeriesUnderPath(r.Context(), s.db, libID, pathOrDir, displayName)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if n == 0 {
+		respondError(w, http.StatusNotFound, "no books found for this name — try scanning the library first")
+		return
+	}
+
+	respond(w, map[string]string{"display_name": displayName})
 }

@@ -11,6 +11,11 @@ type Config struct {
 	Data string
 	Addr string
 
+	// Root directory raw uploaded scans get mirrored into, unconverted, before
+	// OCR — a safety net independent of the conversion pipeline. Empty disables
+	// backup entirely (no directory configured/mounted).
+	BackupDir string
+
 	AdminUser     string
 	AdminPassword string
 
@@ -29,6 +34,7 @@ func Load() Config {
 
 	flag.StringVar(&c.DB, "db", env("YOMEKURO_DB", ""), "PostgreSQL DSN")
 	flag.StringVar(&c.Data, "data", env("YOMEKURO_DATA", "/data"), "Data directory for covers etc.")
+	flag.StringVar(&c.BackupDir, "backup-dir", env("YOMEKURO_BACKUP_DIR", "/backup"), "Root directory raw uploaded scans are mirrored into before OCR (empty disables backup)")
 	flag.StringVar(&c.Addr, "addr", env("YOMEKURO_ADDR", ":8080"), "Listen address")
 	flag.StringVar(&c.AdminUser, "admin-user", env("YOMEKURO_ADMIN_USER", "admin"), "Admin username (created on first run)")
 	flag.StringVar(&c.AdminPassword, "admin-password", env("YOMEKURO_ADMIN_PASSWORD", ""), "Admin password (created on first run)")

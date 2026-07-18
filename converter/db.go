@@ -11,7 +11,14 @@ import (
 // Rescues rows a dead worker left 'running': claimNextJob only takes 'pending'
 // and the API won't delete a running row, so they'd hang in the UI forever.
 func reclaimOrphanedJobs(ctx context.Context, pool *pgxpool.Pool) error {
-	// Asked to stop before the restart — honour that rather than resuming it.
+	// Asked to pause/stop before the restart — honour that rather than resuming it.
+	paused, err := pool.Exec(ctx,
+		`UPDATE conversion_jobs
+		    SET status='paused', current_volume='', pause_requested=false, updated_at=NOW()
+		  WHERE status='running' AND pause_requested`)
+	if err != nil {
+		return err
+	}
 	stopped, err := pool.Exec(ctx,
 		`UPDATE conversion_jobs
 		    SET status='stopped', current_volume='', stop_requested=false, updated_at=NOW()
@@ -27,6 +34,9 @@ func reclaimOrphanedJobs(ctx context.Context, pool *pgxpool.Pool) error {
 		  WHERE status='running'`)
 	if err != nil {
 		return err
+	}
+	if n := paused.RowsAffected(); n > 0 {
+		slog.Info("watch: orphaned jobs marked paused", "count", n)
 	}
 	if n := stopped.RowsAffected(); n > 0 {
 		slog.Info("watch: orphaned jobs marked stopped", "count", n)
@@ -97,20 +107,31 @@ func updateJobVolume(ctx context.Context, pool *pgxpool.Pool, id, volume string)
 }
 
 // Whether the row is flagged for cancellation — polled while mokuro runs.
-func stopRequested(ctx context.Context, pool *pgxpool.Pool, id string) (bool, error) {
-	var stop bool
-	err := pool.QueryRow(ctx,
-		`SELECT stop_requested FROM conversion_jobs WHERE id=$1::uuid`, id,
-	).Scan(&stop)
+// pause is checked ahead of stop by the caller: pause never wipes files on
+// cancel, stop does when nothing converted yet, so which one wins matters.
+func checkJobSignals(ctx context.Context, pool *pgxpool.Pool, id string) (stop, pause bool, err error) {
+	err = pool.QueryRow(ctx,
+		`SELECT stop_requested, pause_requested FROM conversion_jobs WHERE id=$1::uuid`, id,
+	).Scan(&stop, &pause)
 	if err == pgx.ErrNoRows {
-		return false, nil
+		return false, false, nil
 	}
-	return stop, err
+	return stop, pause, err
 }
 
 func markJobStopped(ctx context.Context, pool *pgxpool.Pool, id string) error {
 	_, err := pool.Exec(ctx,
 		`UPDATE conversion_jobs SET status='stopped', current_volume='', stop_requested=false, updated_at=NOW() WHERE id=$1::uuid`, id)
+	return err
+}
+
+// markJobPaused deliberately keeps current_volume (so the UI can show "paused
+// at volume X") and never touches input_path/output_path — the whole point of
+// pause vs stop is that resuming just flips status back to 'pending' with
+// every file exactly where it was.
+func markJobPaused(ctx context.Context, pool *pgxpool.Pool, id string) error {
+	_, err := pool.Exec(ctx,
+		`UPDATE conversion_jobs SET status='paused', pause_requested=false, updated_at=NOW() WHERE id=$1::uuid`, id)
 	return err
 }
 

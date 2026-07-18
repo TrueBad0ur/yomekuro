@@ -25,6 +25,7 @@
       <a href="#libraries" class="settings-nav-link active">Libraries</a>
       <a href="#upload" class="settings-nav-link">Upload &amp; Jobs</a>
       <a href="#books" class="settings-nav-link">Manage Books</a>
+      <a href="#status" class="settings-nav-link">Server Status</a>
       <a href="#users-section" class="settings-nav-link">Users</a>
     </nav>
 
@@ -94,6 +95,11 @@
           <div class="upload-progress-bar"><div id="upload-progress-fill" class="upload-progress-fill"></div></div>
           <span id="upload-progress-label" class="upload-progress-label"></span>
         </div>
+        <div class="queue-controls">
+          <button id="btn-pause-queue" class="reconvert-btn">Pause Queue</button>
+          <button id="btn-resume-queue" class="reconvert-btn">Resume Queue</button>
+          <span id="queue-controls-hint" class="queue-controls-hint"></span>
+        </div>
         <div id="conversion-jobs" class="settings-libraries" style="margin-top:.75rem"></div>
       </section>
 
@@ -119,6 +125,37 @@
           <input id="books-search" type="text" placeholder="Filter by name…" class="user-input" style="width:100%">
         </div>
         <div id="books-list" class="settings-libraries" style="margin-top:.75rem"></div>
+      </section>
+
+      <section class="settings-section" id="status">
+        <h2 class="settings-section-title">Server Status</h2>
+        <p class="upload-hint">
+          Live host CPU/RAM/GPU metrics (the server itself samples every 15s; last 4 hours
+          kept in memory — resets on restart, this is just live telemetry, not stored history).
+        </p>
+        <div class="status-controls">
+          <label class="status-refresh-label">
+            Refresh every
+            <select id="status-refresh-interval" class="user-input">
+              <option value="5000">5s</option>
+              <option value="10000">10s</option>
+              <option value="15000" selected>15s</option>
+              <option value="30000">30s</option>
+              <option value="60000">60s</option>
+            </select>
+          </label>
+          <button id="status-refresh-now" class="status-refresh-btn" title="Refresh now" aria-label="Refresh now">⟳</button>
+        </div>
+        <div id="status-tiles" class="status-tiles">
+          <p style="color:var(--text-dim);font-size:.88rem">Loading…</p>
+        </div>
+        <div class="status-graph-wrap">
+          <div class="status-graph-legend">
+            <span><i class="status-swatch" style="background:#e07070"></i> CPU °C</span>
+            <span><i class="status-swatch" style="background:#6b8fd9"></i> GPU °C</span>
+          </div>
+          <canvas id="status-temp-graph" width="900" height="220"></canvas>
+        </div>
       </section>
 
       <section class="settings-section" id="users-section">

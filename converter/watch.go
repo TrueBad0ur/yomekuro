@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -60,9 +61,13 @@ func processQueuedJob(ctx context.Context, pool *pgxpool.Pool, j *job) {
 	slog.Info("watch: converting", "job", j.Name, "input", j.InputPath, "output", j.OutputPath)
 
 	// Cancelling jobCtx kills mokuro. This poller is the only thing that does so,
-	// watching stop_requested; the deferred cancel also stops it on normal exit.
+	// watching stop_requested/pause_requested; the deferred cancel also stops
+	// it on normal exit. pauseTriggered records which one fired, since Convert
+	// only reports jobCtx.Err() != nil either way — the switch below needs to
+	// know whether to clean up (stop) or preserve everything (pause).
 	jobCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
+	var pauseTriggered atomic.Bool
 	go func() {
 		ticker := time.NewTicker(stopPollInterval)
 		defer ticker.Stop()
@@ -71,10 +76,16 @@ func processQueuedJob(ctx context.Context, pool *pgxpool.Pool, j *job) {
 			case <-jobCtx.Done():
 				return
 			case <-ticker.C:
-				stop, err := stopRequested(ctx, pool, j.ID)
+				stop, pause, err := checkJobSignals(ctx, pool, j.ID)
 				if err != nil {
-					slog.Warn("watch: check stop_requested failed", "job", j.Name, "err", err)
+					slog.Warn("watch: check job signals failed", "job", j.Name, "err", err)
 					continue
+				}
+				if pause {
+					slog.Info("watch: pause requested, cancelling", "job", j.Name)
+					pauseTriggered.Store(true)
+					cancel()
+					return
 				}
 				if stop {
 					slog.Info("watch: stop requested, cancelling", "job", j.Name)
@@ -97,6 +108,12 @@ func processQueuedJob(ctx context.Context, pool *pgxpool.Pool, j *job) {
 	ok, fail, err := Convert(jobCtx, j.InputPath, j.OutputPath, j.Volume, j.ForceOCR, detectorSize, onVolume)
 
 	switch {
+	case jobCtx.Err() != nil && pauseTriggered.Load():
+		// Paused, not stopped: never clean up, regardless of volumes_done — the
+		// entire point is that resuming later just flips status back to
+		// 'pending' with every file exactly where it was.
+		slog.Info("watch: conversion paused", "job", j.Name, "volumes_done", ok)
+		markJobPaused(ctx, pool, j.ID)
 	case jobCtx.Err() != nil:
 		// Cancelled by the stop-poller above: a deliberate user action, not a
 		// failure (the parent ctx is always Background).

@@ -103,6 +103,41 @@ func RequestStopConversionJob(ctx context.Context, pool *pgxpool.Pool, id [16]by
 	return err
 }
 
+// PauseQueue pauses every queued job except whichever one is actively running
+// right now (non-empty current_volume, i.e. mokuro is genuinely mid-page on
+// it) — a still-'pending' job pauses instantly since nothing has claimed it
+// yet; an already-claimed 'running' job gets pause_requested set so its own
+// goroutine notices within one poll tick and stops cleanly. Unlike Stop, this
+// never deletes input/output files regardless of how much (or how little)
+// had converted — resuming just flips status back to 'pending'.
+func PauseQueue(ctx context.Context, pool *pgxpool.Pool) (int64, error) {
+	pending, err := pool.Exec(ctx,
+		`UPDATE conversion_jobs SET status='paused', updated_at=NOW() WHERE status='pending'`)
+	if err != nil {
+		return 0, err
+	}
+	running, err := pool.Exec(ctx,
+		`UPDATE conversion_jobs SET pause_requested=true, updated_at=NOW()
+		 WHERE status='running' AND (current_volume = '' OR current_volume IS NULL)`)
+	if err != nil {
+		return 0, err
+	}
+	return pending.RowsAffected() + running.RowsAffected(), nil
+}
+
+// ResumeQueue flips every paused job back to 'pending' so the worker's normal
+// poll loop claims each one again — the same mechanism reclaimOrphanedJobs
+// already uses for a worker that died mid-job.
+func ResumeQueue(ctx context.Context, pool *pgxpool.Pool) (int64, error) {
+	tag, err := pool.Exec(ctx,
+		`UPDATE conversion_jobs SET status='pending', pause_requested=false, current_volume='', updated_at=NOW()
+		 WHERE status='paused'`)
+	if err != nil {
+		return 0, err
+	}
+	return tag.RowsAffected(), nil
+}
+
 // ConversionJobNameTaken reports whether a non-terminal job already targets
 // this name; callers should also stat the filesystem for on-disk collisions.
 func ConversionJobNameTaken(ctx context.Context, pool *pgxpool.Pool, libraryID [16]byte, name string) (bool, error) {
@@ -110,7 +145,7 @@ func ConversionJobNameTaken(ctx context.Context, pool *pgxpool.Pool, libraryID [
 	err := pool.QueryRow(ctx,
 		`SELECT EXISTS(
 			SELECT 1 FROM conversion_jobs
-			WHERE library_id = $1 AND name = $2 AND status IN ('pending', 'running')
+			WHERE library_id = $1 AND name = $2 AND status IN ('pending', 'running', 'paused')
 		 )`,
 		libraryID, name,
 	).Scan(&exists)

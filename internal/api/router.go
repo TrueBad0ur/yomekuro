@@ -3,6 +3,7 @@ package api
 import (
 	"io/fs"
 	"net/http"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
@@ -10,6 +11,7 @@ import (
 	"github.com/truebad0ur/yomekuro/frontend"
 	"github.com/truebad0ur/yomekuro/internal/auth"
 	"github.com/truebad0ur/yomekuro/internal/scanner"
+	"github.com/truebad0ur/yomekuro/internal/sysstats"
 )
 
 type Server struct {
@@ -17,18 +19,27 @@ type Server struct {
 	scanner            *scanner.Scanner
 	watcher            *scanner.Watcher
 	dataDir            string
+	backupDir          string
 	zips               *zipCache
 	jobsPollIntervalMS int
+	sysStats           *sysstats.Collector
 }
 
-func NewRouter(pool *pgxpool.Pool, sc *scanner.Scanner, w *scanner.Watcher, dataDir string, zipCacheSize, jobsPollIntervalMS int) http.Handler {
+func NewRouter(pool *pgxpool.Pool, sc *scanner.Scanner, w *scanner.Watcher, dataDir, backupDir string, zipCacheSize, jobsPollIntervalMS int) http.Handler {
+	// 15s samples, 4h retained — enough for the Settings status graph without
+	// an unbounded in-memory history; this is live telemetry, not persisted.
+	stats := sysstats.NewCollector(15*time.Second, 4*time.Hour)
+	go stats.Run(nil)
+
 	s := &Server{
 		db:                 pool,
 		scanner:            sc,
 		watcher:            w,
 		dataDir:            dataDir,
+		backupDir:          backupDir,
 		zips:               newZipCache(zipCacheSize),
 		jobsPollIntervalMS: jobsPollIntervalMS,
+		sysStats:           stats,
 	}
 
 	r := chi.NewRouter()
@@ -82,10 +93,15 @@ func NewRouter(pool *pgxpool.Pool, sc *scanner.Scanner, w *scanner.Watcher, data
 			r.Post("/api/converter/reconvert", s.reconvertSeries)
 			r.Get("/api/converter/extract-images", s.extractVolumeImages)
 			r.Delete("/api/converter/books", s.deleteBook)
+			r.Patch("/api/converter/books", s.renameBook)
 			r.Get("/api/converter/jobs", s.listConversionJobs)
 			r.Delete("/api/converter/jobs/{id}", s.deleteConversionJob)
+			r.Post("/api/converter/queue/pause", s.pauseQueue)
+			r.Post("/api/converter/queue/resume", s.resumeQueue)
 
 			r.Put("/api/books/{id}/tags", s.setBookTags)
+
+			r.Get("/api/system-status", s.systemStatus)
 
 			r.Get("/api/users", s.listUsers)
 			r.Post("/api/users", s.createUser)
