@@ -12,14 +12,15 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
-	"strconv"
 	"strings"
 	"time"
 	"unicode"
 
 	"github.com/go-chi/chi/v5"
+	shared "github.com/truebad0ur/yomekuro-shared"
 	"github.com/truebad0ur/yomekuro/internal/archive"
 	"github.com/truebad0ur/yomekuro/internal/db"
+	"golang.org/x/text/unicode/norm"
 )
 
 const maxUploadBytes = 5 << 30 // 5GiB — raw manga scans can be large
@@ -165,11 +166,6 @@ func extractEPUBImages(epubPath, destDir string) error {
 
 var htmlTagRe = regexp.MustCompile(`<[^>]*>`)
 
-const (
-	epubTextMinCharsPerPage     = 20
-	epubTextMinJapaneseFraction = 0.3
-)
-
 // epubHasTextLayer tells an already-digitized EPUB from a raw-scan upload with
 // no text yet — same thresholds as converter/pdf.go's pdfHasTextLayer.
 func epubHasTextLayer(epubPath string) (bool, error) {
@@ -211,33 +207,15 @@ func epubHasTextLayer(epubPath string) (bool, error) {
 				continue
 			}
 			chars++
-			if isJapaneseRune(r) {
+			if shared.IsJapanese(r) {
 				jaChars++
 			}
 		}
 	}
-	if chars/len(pageFiles) < epubTextMinCharsPerPage {
+	if chars/len(pageFiles) < shared.MinCharsPerPage {
 		return false, nil
 	}
-	return float64(jaChars)/float64(chars) >= epubTextMinJapaneseFraction, nil
-}
-
-// Mirrors converter/pdf.go's isJapanese (separate module, no shared package).
-func isJapaneseRune(r rune) bool {
-	switch {
-	case r >= 0x3040 && r <= 0x30FF: // Hiragana + Katakana
-		return true
-	case r >= 0x4E00 && r <= 0x9FFF: // CJK Unified Ideographs
-		return true
-	case r >= 0x3400 && r <= 0x4DBF: // CJK Extension A
-		return true
-	case r >= 0x3000 && r <= 0x303F: // CJK punctuation
-		return true
-	case r >= 0xFF00 && r <= 0xFFEF: // Halfwidth/fullwidth forms
-		return true
-	default:
-		return false
-	}
+	return float64(jaChars)/float64(chars) >= shared.MinJapaneseFraction, nil
 }
 
 // Rejects path separators and leading dots, so the "<name>-in"/"<name>" folders
@@ -249,6 +227,9 @@ func sanitizeName(name string) (string, error) {
 	}
 	if name != filepath.Base(name) || strings.HasPrefix(name, ".") {
 		return "", fmt.Errorf("invalid name")
+	}
+	if strings.HasSuffix(name, "-in") {
+		return "", fmt.Errorf("name cannot end in \"-in\" (reserved for raw-scan folders)")
 	}
 	return name, nil
 }
@@ -333,7 +314,7 @@ func (s *Server) uploadArchive(w http.ResponseWriter, r *http.Request) {
 	if !addToExisting {
 		taken, err := db.ConversionJobNameTaken(r.Context(), s.db, libID, name)
 		if err != nil {
-			respondError(w, http.StatusInternalServerError, err.Error())
+			respondInternal(w, "internal error", err)
 			return
 		}
 		if taken {
@@ -350,7 +331,7 @@ func (s *Server) uploadArchive(w http.ResponseWriter, r *http.Request) {
 	}
 	stagingDir, err := os.MkdirTemp(lib.Path, stagingPrefix)
 	if err != nil {
-		respondError(w, http.StatusInternalServerError, "cannot create staging dir: "+err.Error())
+		respondInternal(w, "cannot create staging dir", err)
 		return
 	}
 	keepStaging := false
@@ -376,12 +357,12 @@ func (s *Server) uploadArchive(w http.ResponseWriter, r *http.Request) {
 		}
 		dst, err := os.Create(filepath.Join(stagingDir, volName+".pdf"))
 		if err != nil {
-			respondError(w, http.StatusInternalServerError, "cannot save upload: "+err.Error())
+			respondInternal(w, "cannot save upload", err)
 			return
 		}
 		if _, err := io.Copy(dst, file); err != nil {
 			dst.Close()
-			respondError(w, http.StatusInternalServerError, "cannot save upload: "+err.Error())
+			respondInternal(w, "cannot save upload", err)
 			return
 		}
 		dst.Close()
@@ -401,12 +382,12 @@ func (s *Server) uploadArchive(w http.ResponseWriter, r *http.Request) {
 		tmpEPUBPath := filepath.Join(stagingDir, volName+".epub")
 		dst, err := os.Create(tmpEPUBPath)
 		if err != nil {
-			respondError(w, http.StatusInternalServerError, "cannot save upload: "+err.Error())
+			respondInternal(w, "cannot save upload", err)
 			return
 		}
 		if _, err := io.Copy(dst, file); err != nil {
 			dst.Close()
-			respondError(w, http.StatusInternalServerError, "cannot save upload: "+err.Error())
+			respondInternal(w, "cannot save upload", err)
 			return
 		}
 		dst.Close()
@@ -419,11 +400,11 @@ func (s *Server) uploadArchive(w http.ResponseWriter, r *http.Request) {
 		if hasText {
 			// Already has real text — place as a finished volume, no OCR needed.
 			if err := os.MkdirAll(outDir, 0755); err != nil {
-				respondError(w, http.StatusInternalServerError, "cannot create book folder: "+err.Error())
+				respondInternal(w, "cannot create book folder", err)
 				return
 			}
 			if err := os.Rename(tmpEPUBPath, filepath.Join(outDir, volName+".epub")); err != nil {
-				respondError(w, http.StatusInternalServerError, "cannot move upload: "+err.Error())
+				respondInternal(w, "cannot move upload", err)
 				return
 			}
 			w.WriteHeader(http.StatusCreated)
@@ -446,7 +427,7 @@ func (s *Server) uploadArchive(w http.ResponseWriter, r *http.Request) {
 		defer os.Remove(tmpArchive.Name())
 		if _, err := io.Copy(tmpArchive, file); err != nil {
 			tmpArchive.Close()
-			respondError(w, http.StatusInternalServerError, "cannot save upload: "+err.Error())
+			respondInternal(w, "cannot save upload", err)
 			return
 		}
 		tmpArchive.Close()
@@ -467,7 +448,7 @@ func (s *Server) uploadArchive(w http.ResponseWriter, r *http.Request) {
 		inDir = stagingDir
 		keepStaging = true
 	} else if err := os.Rename(stagingDir, inDir); err != nil {
-		respondError(w, http.StatusInternalServerError, "cannot move extracted files: "+err.Error())
+		respondInternal(w, "cannot move extracted files", err)
 		return
 	}
 
@@ -479,7 +460,7 @@ func (s *Server) uploadArchive(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if _, err := db.CreateConversionJob(r.Context(), s.db, libID, name, inDir, outDir); err != nil {
-		respondError(w, http.StatusInternalServerError, "cannot queue job: "+err.Error())
+		respondInternal(w, "cannot queue job", err)
 		return
 	}
 
@@ -508,12 +489,12 @@ func (s *Server) uploadHTMLFile(w http.ResponseWriter, r *http.Request, lib db.L
 
 	dst, err := os.Create(destPath)
 	if err != nil {
-		respondError(w, http.StatusInternalServerError, "cannot save upload: "+err.Error())
+		respondInternal(w, "cannot save upload", err)
 		return
 	}
 	defer dst.Close()
 	if _, err := io.Copy(dst, file); err != nil {
-		respondError(w, http.StatusInternalServerError, "cannot save upload: "+err.Error())
+		respondInternal(w, "cannot save upload", err)
 		return
 	}
 
@@ -527,8 +508,8 @@ func containsSupportedContent(dir string) bool {
 		if err != nil || found || d.IsDir() {
 			return nil
 		}
-		switch strings.ToLower(filepath.Ext(d.Name())) {
-		case ".jpg", ".jpeg", ".png", ".webp", ".jxl", ".pdf":
+		ext := filepath.Ext(d.Name())
+		if shared.IsImageExt(ext) || strings.ToLower(ext) == ".pdf" {
 			found = true
 		}
 		return nil
@@ -553,7 +534,7 @@ type conversionJobDTO struct {
 func (s *Server) listConversionJobs(w http.ResponseWriter, r *http.Request) {
 	jobs, err := db.ListConversionJobs(r.Context(), s.db)
 	if err != nil {
-		respondError(w, http.StatusInternalServerError, err.Error())
+		respondInternal(w, "internal error", err)
 		return
 	}
 
@@ -576,8 +557,6 @@ func (s *Server) listConversionJobs(w http.ResponseWriter, r *http.Request) {
 	respond(w, map[string]any{"items": dtos})
 }
 
-var volNumRe = regexp.MustCompile(`\d+`)
-
 // sortVolumeNames orders by last embedded number, not lexicographically.
 func sortVolumeNames(names []string) {
 	sort.Slice(names, func(i, j int) bool {
@@ -593,23 +572,10 @@ func sortVolumeNames(names []string) {
 	})
 }
 
+// lastNumber is a thin wrapper around shared.LastInteger, kept under its
+// original name since it's used throughout this file.
 func lastNumber(name string) (int, bool) {
-	// Fullwidth digits (１２３) don't match \d — normalize to ASCII first.
-	halfwidth := strings.Map(func(r rune) rune {
-		if r >= '０' && r <= '９' {
-			return r - '０' + '0'
-		}
-		return r
-	}, name)
-	matches := volNumRe.FindAllString(halfwidth, -1)
-	if len(matches) == 0 {
-		return 0, false
-	}
-	n, err := strconv.Atoi(matches[len(matches)-1])
-	if err != nil {
-		return 0, false
-	}
-	return n, true
+	return shared.LastInteger(name)
 }
 
 type reconvertVolumeDTO struct {
@@ -622,6 +588,70 @@ type reconvertVolumeDTO struct {
 // rawScanNewerThanEPUB flags a hand-edited raw scan as stale even though OCR
 // never re-ran. Directory mtimes count too: renaming a file in place doesn't
 // touch its own mtime, but does touch its parent directory's.
+// findRawScanRoot resolves the "<name>-in" raw-scan folder for a book. A plain
+// byte-exact join can miss it: names synced in from macOS/HFS+ are Unicode
+// NFD-normalized, server-created folders are NFC — visually identical,
+// byte-different. Falls back to scanning lib.Path and comparing NFC forms.
+func findRawScanRoot(libPath, name string) (string, bool) {
+	exact := filepath.Join(libPath, name+"-in")
+	if info, err := os.Stat(exact); err == nil && info.IsDir() {
+		return exact, true
+	}
+	entries, err := os.ReadDir(libPath)
+	if err != nil {
+		return "", false
+	}
+	want := norm.NFC.String(name + "-in")
+	for _, e := range entries {
+		if e.IsDir() && norm.NFC.String(e.Name()) == want {
+			return filepath.Join(libPath, e.Name()), true
+		}
+	}
+	return "", false
+}
+
+// findRawScanVolumeDir resolves the raw-scan subdirectory under inDir that
+// corresponds to volume (an EPUB-derived volume name). Tries an exact match,
+// then an NFC-normalized match (see findRawScanRoot), then — only if it
+// resolves unambiguously — a match by trailing volume number, for the case
+// where the raw scan was re-uploaded under a differently-styled name
+// (e.g. romanized vs. original Japanese).
+func findRawScanVolumeDir(inDir, volume string) (string, bool) {
+	entries, err := os.ReadDir(inDir)
+	if err != nil {
+		return "", false
+	}
+	var candidates []string
+	for _, e := range entries {
+		if e.IsDir() && e.Name() != "_ocr" {
+			candidates = append(candidates, e.Name())
+		}
+	}
+	for _, c := range candidates {
+		if c == volume {
+			return c, true
+		}
+	}
+	volNFC := norm.NFC.String(volume)
+	for _, c := range candidates {
+		if norm.NFC.String(c) == volNFC {
+			return c, true
+		}
+	}
+	if n, ok := lastNumber(volume); ok {
+		var matches []string
+		for _, c := range candidates {
+			if cn, ok := lastNumber(c); ok && cn == n {
+				matches = append(matches, c)
+			}
+		}
+		if len(matches) == 1 {
+			return matches[0], true
+		}
+	}
+	return "", false
+}
+
 func rawScanNewerThanEPUB(volRawDir string, epubModTime time.Time) bool {
 	info, err := os.Stat(volRawDir)
 	if err != nil || !info.IsDir() {
@@ -638,6 +668,7 @@ func rawScanNewerThanEPUB(volRawDir string, epubModTime time.Time) bool {
 		}
 		if fi.ModTime().After(epubModTime) {
 			newer = true
+			return filepath.SkipAll
 		}
 		return nil
 	})
@@ -713,17 +744,15 @@ func (s *Server) listReconvertable(w http.ResponseWriter, r *http.Request) {
 			byName[n] = ep
 		}
 		sortVolumeNames(names)
-		inDir := filepath.Join(lib.Path, e.Name()+"-in")
-		hasRawScan := false
-		if info, err := os.Stat(inDir); err == nil && info.IsDir() {
-			hasRawScan = true
-		}
+		inDir, hasRawScan := findRawScanRoot(lib.Path, e.Name())
 		volumes := make([]reconvertVolumeDTO, len(names))
 		for i, n := range names {
 			needsReconvert := false
 			if hasRawScan {
-				if epubInfo, err := os.Stat(byName[n]); err == nil {
-					needsReconvert = rawScanNewerThanEPUB(filepath.Join(inDir, n), epubInfo.ModTime())
+				if volDir, ok := findRawScanVolumeDir(inDir, n); ok {
+					if epubInfo, err := os.Stat(byName[n]); err == nil {
+						needsReconvert = rawScanNewerThanEPUB(filepath.Join(inDir, volDir), epubInfo.ModTime())
+					}
 				}
 			}
 			volumes[i] = reconvertVolumeDTO{Name: n, HasImages: epubHasImages(byName[n]), ModifiedAt: fileModTime(byName[n]), NeedsReconvert: needsReconvert}
@@ -758,12 +787,19 @@ func (s *Server) listReconvertable(w http.ResponseWriter, r *http.Request) {
 
 // reconvertSeries queues a full OCR re-run reusing the "<name>-in" raw scan
 // still on disk — a cache-reuse rebuild wouldn't pick up OCR improvements.
+// Volumes (plural) queues several volumes of the same book at once — a real
+// server-side queue: converter/db.go's claimNextJob only ever runs one
+// pending row per (library_id, name) at a time, so the rest sit as 'pending'
+// rows and start themselves as each one finishes, surviving a closed browser
+// tab. Volume (singular, legacy) still reconverts one volume or (empty) the
+// whole book in a single request, unchanged.
 func (s *Server) reconvertSeries(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		LibraryID    string `json:"library_id"`
-		Name         string `json:"name"`
-		Volume       string `json:"volume"`
-		DetectorSize int    `json:"detector_size"`
+		LibraryID    string   `json:"library_id"`
+		Name         string   `json:"name"`
+		Volume       string   `json:"volume"`
+		Volumes      []string `json:"volumes"`
+		DetectorSize int      `json:"detector_size"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		respondError(w, http.StatusBadRequest, "invalid JSON")
@@ -794,9 +830,14 @@ func (s *Server) reconvertSeries(w http.ResponseWriter, r *http.Request) {
 		respondError(w, http.StatusNotFound, "book not found in this library")
 		return
 	}
-	inDir := filepath.Join(lib.Path, name+"-in")
-	if info, err := os.Stat(inDir); err != nil || !info.IsDir() {
+	inDir, ok := findRawScanRoot(lib.Path, name)
+	if !ok {
 		respondError(w, http.StatusConflict, "raw scan data no longer available — re-upload to reconvert")
+		return
+	}
+
+	if len(req.Volumes) > 0 {
+		s.reconvertVolumesBulk(w, r, libID, name, inDir, outDir, req.Volumes, detectorSize)
 		return
 	}
 
@@ -811,11 +852,17 @@ func (s *Server) reconvertSeries(w http.ResponseWriter, r *http.Request) {
 			respondError(w, http.StatusNotFound, "volume not found in this book")
 			return
 		}
+		if resolved, ok := findRawScanVolumeDir(inDir, volume); ok {
+			volume = resolved
+		} else {
+			respondError(w, http.StatusConflict, fmt.Sprintf("raw scan for volume %q not found under %q — raw scan folder naming may not match this volume", volume, filepath.Base(inDir)))
+			return
+		}
 	}
 
 	taken, err := db.ConversionJobNameTaken(r.Context(), s.db, libID, name)
 	if err != nil {
-		respondError(w, http.StatusInternalServerError, err.Error())
+		respondInternal(w, "internal error", err)
 		return
 	}
 	if taken {
@@ -824,12 +871,50 @@ func (s *Server) reconvertSeries(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if _, err := db.CreateReconvertJob(r.Context(), s.db, libID, name, inDir, outDir, volume, detectorSize); err != nil {
-		respondError(w, http.StatusInternalServerError, "cannot queue job: "+err.Error())
+		respondInternal(w, "cannot queue job", err)
 		return
 	}
 
 	w.WriteHeader(http.StatusCreated)
 	respond(w, map[string]string{"name": name, "status": "pending"})
+}
+
+// reconvertVolumesBulk validates every requested volume up front and, only if
+// all of them resolve, queues one pending job per volume in a single
+// transaction — a partial success (some volumes queued, some rejected) would
+// leave the caller unsure which ones actually need re-selecting.
+// Deliberately does not check ConversionJobNameTaken: stacking several
+// pending rows for the same book is the point (see reconvertSeries's doc
+// comment) — that guard exists to keep uploads/deletes from racing an active
+// job, not to cap how many reconvert jobs can be queued for one book.
+func (s *Server) reconvertVolumesBulk(w http.ResponseWriter, r *http.Request, libID [16]byte, name, inDir, outDir string, volumesIn []string, detectorSize int) {
+	resolved := make([]string, 0, len(volumesIn))
+	for _, raw := range volumesIn {
+		volume, err := sanitizeName(raw)
+		if err != nil {
+			respondError(w, http.StatusBadRequest, fmt.Sprintf("invalid volume name %q", raw))
+			return
+		}
+		if _, err := os.Stat(filepath.Join(outDir, volume+".epub")); err != nil {
+			respondError(w, http.StatusNotFound, fmt.Sprintf("volume %q not found in this book", volume))
+			return
+		}
+		rawVol, ok := findRawScanVolumeDir(inDir, volume)
+		if !ok {
+			respondError(w, http.StatusConflict, fmt.Sprintf("raw scan for volume %q not found under %q", volume, filepath.Base(inDir)))
+			return
+		}
+		resolved = append(resolved, rawVol)
+	}
+
+	jobs, err := db.CreateReconvertJobsBulk(r.Context(), s.db, libID, name, inDir, outDir, resolved, detectorSize)
+	if err != nil {
+		respondInternal(w, "cannot queue jobs", err)
+		return
+	}
+
+	w.WriteHeader(http.StatusCreated)
+	respond(w, map[string]any{"name": name, "queued": len(jobs)})
 }
 
 // Stops or removes a job by state: a running one is only flagged (deleting its
@@ -847,7 +932,7 @@ func (s *Server) deleteConversionJob(w http.ResponseWriter, r *http.Request) {
 
 	if j.Status == "running" {
 		if err := db.RequestStopConversionJob(r.Context(), s.db, id); err != nil {
-			respondError(w, http.StatusInternalServerError, err.Error())
+			respondInternal(w, "internal error", err)
 			return
 		}
 		w.WriteHeader(http.StatusAccepted)
@@ -856,7 +941,7 @@ func (s *Server) deleteConversionJob(w http.ResponseWriter, r *http.Request) {
 
 	inputPath, _, err := db.DeleteConversionJob(r.Context(), s.db, id)
 	if err != nil {
-		respondError(w, http.StatusInternalServerError, err.Error())
+		respondInternal(w, "internal error", err)
 		return
 	}
 	// Only a never-succeeded job's input is disposable; wiping a 'done'/'paused'
@@ -872,7 +957,7 @@ func (s *Server) deleteConversionJob(w http.ResponseWriter, r *http.Request) {
 func (s *Server) pauseQueue(w http.ResponseWriter, r *http.Request) {
 	n, err := db.PauseQueue(r.Context(), s.db)
 	if err != nil {
-		respondError(w, http.StatusInternalServerError, err.Error())
+		respondInternal(w, "internal error", err)
 		return
 	}
 	respond(w, map[string]any{"affected": n})
@@ -881,7 +966,7 @@ func (s *Server) pauseQueue(w http.ResponseWriter, r *http.Request) {
 func (s *Server) resumeQueue(w http.ResponseWriter, r *http.Request) {
 	n, err := db.ResumeQueue(r.Context(), s.db)
 	if err != nil {
-		respondError(w, http.StatusInternalServerError, err.Error())
+		respondInternal(w, "internal error", err)
 		return
 	}
 	respond(w, map[string]any{"affected": n})
@@ -1047,9 +1132,11 @@ func (s *Server) deleteBook(w http.ResponseWriter, r *http.Request) {
 		if _, err := os.Stat(htmlPath); err != nil {
 			htmlPath = filepath.Join(lib.Path, name+".htm")
 		}
-		db.DeleteBookByPath(r.Context(), s.db, htmlPath)
+		if cover, derr := db.DeleteBookByPath(r.Context(), s.db, htmlPath); derr == nil && cover != "" {
+			os.Remove(cover)
+		}
 		if err := os.Remove(htmlPath); err != nil && !os.IsNotExist(err) {
-			respondError(w, http.StatusInternalServerError, "failed to delete file: "+err.Error())
+			respondInternal(w, "failed to delete file", err)
 			return
 		}
 		w.WriteHeader(http.StatusNoContent)
@@ -1058,7 +1145,7 @@ func (s *Server) deleteBook(w http.ResponseWriter, r *http.Request) {
 
 	taken, err := db.ConversionJobNameTaken(r.Context(), s.db, libID, name)
 	if err != nil {
-		respondError(w, http.StatusInternalServerError, err.Error())
+		respondInternal(w, "internal error", err)
 		return
 	}
 	if taken {
@@ -1079,16 +1166,29 @@ func (s *Server) deleteBook(w http.ResponseWriter, r *http.Request) {
 			respondError(w, http.StatusNotFound, "volume not found")
 			return
 		}
-		db.DeleteBookByPath(r.Context(), s.db, epubPath)
+		if cover, derr := db.DeleteBookByPath(r.Context(), s.db, epubPath); derr == nil && cover != "" {
+			os.Remove(cover)
+		}
 		if err := os.Remove(epubPath); err != nil {
-			respondError(w, http.StatusInternalServerError, "failed to delete volume: "+err.Error())
+			respondInternal(w, "failed to delete volume", err)
 			return
 		}
 
-		inDir := filepath.Join(lib.Path, name+"-in")
-		os.RemoveAll(filepath.Join(inDir, volume))
-		os.Remove(filepath.Join(inDir, volume+".mokuro"))
-		os.RemoveAll(filepath.Join(inDir, "_ocr", volume))
+		if inDir, ok := findRawScanRoot(lib.Path, name); ok {
+			rawVol := volume
+			if resolved, ok := findRawScanVolumeDir(inDir, volume); ok {
+				rawVol = resolved
+			}
+			if err := os.RemoveAll(filepath.Join(inDir, rawVol)); err != nil {
+				slog.Warn("delete volume: could not remove raw scan dir", "path", filepath.Join(inDir, rawVol), "err", err)
+			}
+			if err := os.Remove(filepath.Join(inDir, rawVol+".mokuro")); err != nil && !os.IsNotExist(err) {
+				slog.Warn("delete volume: could not remove mokuro file", "path", filepath.Join(inDir, rawVol+".mokuro"), "err", err)
+			}
+			if err := os.RemoveAll(filepath.Join(inDir, "_ocr", rawVol)); err != nil {
+				slog.Warn("delete volume: could not remove ocr cache", "path", filepath.Join(inDir, "_ocr", rawVol), "err", err)
+			}
+		}
 
 		w.WriteHeader(http.StatusNoContent)
 		return
@@ -1099,11 +1199,13 @@ func (s *Server) deleteBook(w http.ResponseWriter, r *http.Request) {
 
 	epubs, _ := filepath.Glob(filepath.Join(outDir, "*.epub"))
 	for _, ep := range epubs {
-		db.DeleteBookByPath(r.Context(), s.db, ep)
+		if cover, derr := db.DeleteBookByPath(r.Context(), s.db, ep); derr == nil && cover != "" {
+			os.Remove(cover)
+		}
 	}
 
 	if err := os.RemoveAll(outDir); err != nil {
-		respondError(w, http.StatusInternalServerError, "failed to delete book folder: "+err.Error())
+		respondInternal(w, "failed to delete book folder", err)
 		return
 	}
 	os.RemoveAll(inDir)
@@ -1157,7 +1259,7 @@ func (s *Server) renameBook(w http.ResponseWriter, r *http.Request) {
 
 	n, err := db.RenameSeriesUnderPath(r.Context(), s.db, libID, pathOrDir, displayName)
 	if err != nil {
-		respondError(w, http.StatusInternalServerError, err.Error())
+		respondInternal(w, "internal error", err)
 		return
 	}
 	if n == 0 {

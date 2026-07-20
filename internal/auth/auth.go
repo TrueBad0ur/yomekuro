@@ -14,6 +14,11 @@ import (
 
 const SessionDuration = 30 * 24 * time.Hour
 
+// MinPasswordLength is enforced wherever a password is set (register, admin
+// create/update user) — previously only checked for non-empty, so "a" was
+// accepted.
+const MinPasswordLength = 8
+
 type User struct {
 	ID       [16]byte
 	Username string
@@ -99,6 +104,25 @@ func DeleteSession(ctx context.Context, pool *pgxpool.Pool, token string) error 
 	return err
 }
 
+// SweepExpiredSessions deletes sessions past their expires_at. Nothing else
+// in this codebase prunes the sessions table — without a periodic caller,
+// expired rows accumulate forever.
+func SweepExpiredSessions(ctx context.Context, pool *pgxpool.Pool) (int64, error) {
+	tag, err := pool.Exec(ctx, `DELETE FROM sessions WHERE expires_at < NOW()`)
+	if err != nil {
+		return 0, err
+	}
+	return tag.RowsAffected(), nil
+}
+
+// DeleteSessionsForUser invalidates every session belonging to a user —
+// used when their password changes, so a stolen session token doesn't
+// outlive the very reset meant to revoke access.
+func DeleteSessionsForUser(ctx context.Context, pool *pgxpool.Pool, userID [16]byte) error {
+	_, err := pool.Exec(ctx, `DELETE FROM sessions WHERE user_id = $1`, userID)
+	return err
+}
+
 func EnsureAdmin(ctx context.Context, pool *pgxpool.Pool, username, password string) error {
 	var count int
 	_ = pool.QueryRow(ctx, `SELECT COUNT(*) FROM users WHERE is_admin = true`).Scan(&count)
@@ -136,6 +160,20 @@ func DeleteUser(ctx context.Context, pool *pgxpool.Pool, id [16]byte) error {
 	return err
 }
 
+func CountAdmins(ctx context.Context, pool *pgxpool.Pool) (int, error) {
+	var n int
+	err := pool.QueryRow(ctx, `SELECT COUNT(*) FROM users WHERE is_admin = true`).Scan(&n)
+	return n, err
+}
+
+// IsAdmin reports whether the given user is currently an admin — used to
+// decide whether an is_admin=false update would remove the last one.
+func IsAdmin(ctx context.Context, pool *pgxpool.Pool, id [16]byte) (bool, error) {
+	var isAdmin bool
+	err := pool.QueryRow(ctx, `SELECT is_admin FROM users WHERE id = $1`, id).Scan(&isAdmin)
+	return isAdmin, err
+}
+
 func UpdateUser(ctx context.Context, pool *pgxpool.Pool, id [16]byte, newUsername, newPassword string, isAdmin *bool) error {
 	if newUsername != "" {
 		if _, err := pool.Exec(ctx, `UPDATE users SET username=$2 WHERE id=$1`, id, newUsername); err != nil {
@@ -148,6 +186,11 @@ func UpdateUser(ctx context.Context, pool *pgxpool.Pool, id [16]byte, newUsernam
 			return err
 		}
 		if _, err := pool.Exec(ctx, `UPDATE users SET password_hash=$2 WHERE id=$1`, id, hash); err != nil {
+			return err
+		}
+		// A changed password should immediately revoke any session issued
+		// under the old one (e.g. resetting a compromised account).
+		if err := DeleteSessionsForUser(ctx, pool, id); err != nil {
 			return err
 		}
 	}

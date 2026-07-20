@@ -5,6 +5,7 @@
 services:
   db:
     image: postgres:17-alpine
+    restart: unless-stopped
     environment:
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
@@ -18,6 +19,7 @@ services:
 
   yomekuro:
     image: truebad0ur/yomekuro:${YOMEKURO_VERSION}
+    restart: unless-stopped
     depends_on:
       db:
         condition: service_healthy

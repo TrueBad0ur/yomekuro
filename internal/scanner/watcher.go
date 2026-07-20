@@ -109,10 +109,16 @@ func (w *Watcher) handleEvent(ctx context.Context, event fsnotify.Event) {
 
 	if event.Has(fsnotify.Remove) || event.Has(fsnotify.Rename) {
 		w.debounceOp(name, func() {
-			if err := db.DeleteBookByPath(ctx, w.pool, name); err != nil {
+			cover, err := db.DeleteBookByPath(ctx, w.pool, name)
+			if err != nil {
 				slog.Error("watcher: delete book", "path", name, "err", err)
-			} else {
-				slog.Info("watcher: removed book", "path", name)
+				return
+			}
+			slog.Info("watcher: removed book", "path", name)
+			if cover != "" {
+				if rmErr := os.Remove(cover); rmErr != nil && !os.IsNotExist(rmErr) {
+					slog.Warn("watcher: could not remove orphaned cover", "path", cover, "err", rmErr)
+				}
 			}
 		})
 		return

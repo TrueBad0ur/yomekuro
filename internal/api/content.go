@@ -55,10 +55,46 @@ type zipCache struct {
 	order *list.List
 }
 
+// cacheEntry is refcounted: LRU eviction or hash-invalidation only marks it
+// evicted rather than closing it outright, since a concurrent reader may
+// still be streaming a chapter's body from entry.rc at that moment (e.g. a
+// reconvert overwrites the EPUB, changing file_hash, while another request
+// is mid-read of the old content) — closing under it would corrupt that read
+// or read from a reused file descriptor.
 type cacheEntry struct {
-	path string
-	hash string
-	rc   *zip.ReadCloser
+	path    string
+	hash    string
+	rc      *zip.ReadCloser
+	refs    int
+	evicted bool
+}
+
+// zipHandle is what callers of zipCache.get hold. Release must be called
+// exactly once (typically via defer) when done reading from Files().
+type zipHandle struct {
+	cache *zipCache
+	entry *cacheEntry
+}
+
+func (h *zipHandle) Files() []*zip.File { return h.entry.rc.File }
+
+func (h *zipHandle) Release() {
+	h.cache.mu.Lock()
+	defer h.cache.mu.Unlock()
+	h.entry.refs--
+	if h.entry.refs == 0 && h.entry.evicted {
+		h.entry.rc.Close()
+	}
+}
+
+// closeOrMarkEvicted closes entry immediately if nothing is reading from it,
+// or flags it for close-on-last-release otherwise. Caller must hold c.mu.
+func closeOrMarkEvicted(entry *cacheEntry) {
+	if entry.refs == 0 {
+		entry.rc.Close()
+	} else {
+		entry.evicted = true
+	}
 }
 
 func newZipCache(capacity int) *zipCache {
@@ -69,9 +105,9 @@ func newZipCache(capacity int) *zipCache {
 	}
 }
 
-// A cached *zip.ReadCloser, reopened if its hash changed (file rewritten in
-// place). The cache owns it — callers must not close it.
-func (c *zipCache) get(path, hash string) (*zip.ReadCloser, error) {
+// A cached, refcounted zip reader, reopened if its hash changed (file
+// rewritten in place). Callers must call Release() on the returned handle.
+func (c *zipCache) get(path, hash string) (*zipHandle, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
@@ -79,10 +115,11 @@ func (c *zipCache) get(path, hash string) (*zip.ReadCloser, error) {
 		entry := el.Value.(*cacheEntry)
 		if entry.hash == hash {
 			c.order.MoveToFront(el)
-			return entry.rc, nil
+			entry.refs++
+			return &zipHandle{cache: c, entry: entry}, nil
 		}
 		// File changed on disk — drop the stale reader.
-		entry.rc.Close()
+		closeOrMarkEvicted(entry)
 		delete(c.items, path)
 		c.order.Remove(el)
 	}
@@ -96,18 +133,20 @@ func (c *zipCache) get(path, hash string) (*zip.ReadCloser, error) {
 		back := c.order.Back()
 		if back != nil {
 			entry := back.Value.(*cacheEntry)
-			entry.rc.Close()
+			closeOrMarkEvicted(entry)
 			delete(c.items, entry.path)
 			c.order.Remove(back)
 		}
 	}
 
-	el := c.order.PushFront(&cacheEntry{path: path, hash: hash, rc: rc})
+	entry := &cacheEntry{path: path, hash: hash, rc: rc, refs: 1}
+	el := c.order.PushFront(entry)
 	c.items[path] = el
-	return rc, nil
+	return &zipHandle{cache: c, entry: entry}, nil
 }
 
-// No caller yet — the hook for a future graceful shutdown.
+// No caller yet — the hook for a future graceful shutdown. Closes
+// unconditionally: only meant to run once nothing is reading anymore.
 //
 //nolint:unused
 func (c *zipCache) closeAll() {
@@ -147,7 +186,7 @@ func (s *Server) getBookManifest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err != nil {
-		respondError(w, http.StatusInternalServerError, err.Error())
+		respondInternal(w, "internal error", err)
 		return
 	}
 
@@ -196,7 +235,7 @@ func (s *Server) getBookContent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err != nil {
-		respondError(w, http.StatusInternalServerError, err.Error())
+		respondInternal(w, "internal error", err)
 		return
 	}
 
@@ -227,15 +266,16 @@ func (s *Server) getBookContent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	zr, err := s.zips.get(b.Path, b.FileHash)
+	zh, err := s.zips.get(b.Path, b.FileHash)
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, "could not open epub")
 		return
 	}
+	defer zh.Release()
 
 	// Find and stream the zip entry.
 	var found *zip.File
-	for _, f := range zr.File {
+	for _, f := range zh.Files() {
 		if f.Name == entryPath {
 			found = f
 			break

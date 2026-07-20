@@ -112,6 +112,8 @@ jobs:
         with:
           context: ./converter
           file: ./converter/Dockerfile.cpu
+          build-contexts: |
+            shared=./shared
           platforms: linux/amd64,linux/arm64
           push: true
           tags: truebad0ur/converter:cpu-${{ needs.guard.outputs.version }}
@@ -150,6 +152,8 @@ jobs:
         with:
           context: ./converter
           file: ./converter/Dockerfile.gpu
+          build-contexts: |
+            shared=./shared
           platforms: linux/amd64
           push: true
           tags: truebad0ur/converter:gpu-${{ needs.guard.outputs.version }}

@@ -10,6 +10,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	shared "github.com/truebad0ur/yomekuro-shared"
 )
 
 // How often Convert looks for newly finished ".mokuro" files, so each volume's
@@ -78,7 +80,11 @@ func Convert(ctx context.Context, input, output, volume string, noCache bool, de
 
 	var volumeDirs []string
 	if volume != "" {
-		volumeDirs = []string{filepath.Join(input, volume)}
+		volDir := filepath.Join(input, volume)
+		if info, statErr := os.Stat(volDir); statErr != nil || !info.IsDir() {
+			return ok, 0, fmt.Errorf("volume %q: no raw-scan folder %q (raw scan naming may not match this volume)", volume, volDir)
+		}
+		volumeDirs = []string{volDir}
 		slog.Info("running mokuro OCR on single volume", "volume", volume)
 	} else {
 		flat, err := isFlatVolume(input)
@@ -275,8 +281,7 @@ func isFlatVolume(dir string) (bool, error) {
 			}
 			continue
 		}
-		switch strings.ToLower(filepath.Ext(e.Name())) {
-		case ".jpg", ".jpeg", ".png", ".webp", ".jxl":
+		if shared.IsImageExt(filepath.Ext(e.Name())) {
 			hasImage = true
 		}
 	}

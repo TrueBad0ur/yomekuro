@@ -107,14 +107,17 @@
         <h2 class="settings-section-title">Manage Books</h2>
         <p class="upload-hint">
           Reconvert a book — or just one of its volumes — with a full OCR re-run, useful after a
-          converter/mokuro update. This redoes OCR from the original raw scan (not a rebuild from
-          cached results), so it takes as long as the first conversion did. Reconvert only works
-          while the book's original raw scan is still staged on disk ("no raw scan" otherwise) —
-          "Download images" always works instead, pulling the page images back out of the
-          already-built EPUB, e.g. to test the upload flow without re-sourcing the original scan.
-          Each book is collapsed to one row by default — click its name to see individual
-          volumes — and shows when it was last analyzed; use the search box to filter a large
-          library by name.
+          converter/mokuro update. <strong>Reconverting one volume</strong> only redoes real OCR
+          for that volume — the rest of the book's EPUBs are just quickly rebuilt from their
+          already-recognized text, no extra GPU time spent on them (you may still see them flash
+          past in the conversion log — that's the fast rebuild, not a re-scan).
+          <strong>"Reconvert all"</strong> redoes OCR for every volume in the book from scratch,
+          so it takes as long as the very first conversion did. Reconvert only works while the
+          book's original raw scan is still staged on disk ("no raw scan" otherwise) — "Download
+          images" always works instead, pulling the page images back out of the already-built
+          EPUB, e.g. to test the upload flow without re-sourcing the original scan. Each book is
+          collapsed to one row by default — click its name to see individual volumes — and shows
+          when it was last analyzed; use the search box to filter a large library by name.
         </p>
         <div class="upload-field">
           <span class="upload-field-label">Library</span>
@@ -123,6 +126,14 @@
         <div class="upload-field">
           <span class="upload-field-label">Search</span>
           <input id="books-search" type="text" placeholder="Filter by name…" class="user-input" style="width:100%">
+        </div>
+        <div class="bulk-reconvert-bar">
+          <label class="bulk-reconvert-select-all">
+            <input type="checkbox" id="books-select-all"> Select all
+          </label>
+          <button id="btn-select-flagged" type="button">Select all "raw scan changed"</button>
+          <span id="bulk-reconvert-count" class="bulk-reconvert-count"></span>
+          <button id="btn-bulk-reconvert" type="button" class="reconvert-btn" disabled>Reconvert selected (full OCR)</button>
         </div>
         <div id="books-list" class="settings-libraries" style="margin-top:.75rem"></div>
       </section>

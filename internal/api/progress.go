@@ -19,7 +19,7 @@ func (s *Server) getProgress(w http.ResponseWriter, r *http.Request) {
 
 	p, found, err := db.GetProgress(r.Context(), s.db, id, user.ID)
 	if err != nil && err != pgx.ErrNoRows {
-		respondError(w, http.StatusInternalServerError, err.Error())
+		respondInternal(w, "internal error", err)
 		return
 	}
 	if !found {
@@ -80,7 +80,7 @@ func (s *Server) putProgress(w http.ResponseWriter, r *http.Request) {
 		BookmarkEnd:   req.BookmarkEnd,
 	}
 	if err := db.UpsertProgress(r.Context(), s.db, p); err != nil {
-		respondError(w, http.StatusInternalServerError, err.Error())
+		respondInternal(w, "internal error", err)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -109,7 +109,7 @@ func (s *Server) setReadState(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err != nil {
-		respondError(w, http.StatusInternalServerError, err.Error())
+		respondInternal(w, "internal error", err)
 		return
 	}
 
@@ -128,7 +128,7 @@ func (s *Server) setReadState(w http.ResponseWriter, r *http.Request) {
 	// Carry the bookmark over — read state and a text bookmark are independent.
 	prev, _, err := db.GetProgress(r.Context(), s.db, id, user.ID)
 	if err != nil && err != pgx.ErrNoRows {
-		respondError(w, http.StatusInternalServerError, err.Error())
+		respondInternal(w, "internal error", err)
 		return
 	}
 
@@ -146,7 +146,7 @@ func (s *Server) setReadState(w http.ResponseWriter, r *http.Request) {
 		p.Percentage = 1
 	}
 	if err := db.UpsertProgress(r.Context(), s.db, p); err != nil {
-		respondError(w, http.StatusInternalServerError, err.Error())
+		respondInternal(w, "internal error", err)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)

@@ -27,7 +27,10 @@ require (
 	github.com/pierrec/lz4/v4 v4.1.27 // indirect
 	github.com/spf13/afero v1.15.0 // indirect
 	github.com/stangelandcl/ppmd v0.1.1 // indirect
+	github.com/truebad0ur/yomekuro-shared v0.0.0-00010101000000-000000000000
 	go4.org v0.0.0-20260112195520-a5071408f32f // indirect
 	golang.org/x/sync v0.22.0 // indirect
 	golang.org/x/sys v0.47.0 // indirect
 )
+
+replace github.com/truebad0ur/yomekuro-shared => ./shared

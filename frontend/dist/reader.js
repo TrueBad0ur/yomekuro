@@ -876,6 +876,7 @@ window.addEventListener('scroll', () => {
 fetch('/api/auth/me').then(r => {
   if (!r.ok) { location.href = '/login'; return; }
   init().catch(err => {
-    content.innerHTML = `<p style="padding:2rem;color:#c77">Error: ${err.message}</p>`;
+    const msg = String(err.message).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    content.innerHTML = `<p style="padding:2rem;color:#c77">Error: ${msg}</p>`;
   });
 }).catch(() => { location.href = '/login'; });

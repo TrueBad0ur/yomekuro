@@ -4,6 +4,11 @@ FROM --platform=$BUILDPLATFORM golang:1.26-alpine AS builder
 ARG TARGETOS TARGETARCH
 WORKDIR /app
 COPY go.mod go.sum ./
+# go.mod's "replace ... => ../shared" resolves to /shared, one level above
+# WORKDIR — populated from a separate build context so this Dockerfile stays
+# buildable with converter/ as its context root (see docker-compose.yml's
+# additional_contexts / the --build-context flag in build commands).
+COPY --from=shared . /shared
 RUN go mod download
 COPY *.go ./
 RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH \

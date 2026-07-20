@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"log/slog"
 	"net/http"
 )
 
@@ -17,6 +18,14 @@ func respondError(w http.ResponseWriter, code int, msg string) {
 	w.Header().Set("Cache-Control", "no-store")
 	w.WriteHeader(code)
 	json.NewEncoder(w).Encode(map[string]string{"error": msg})
+}
+
+// respondInternal answers with a neutral 500 message and logs the real error
+// server-side — the error text itself (pgx query details, filesystem paths
+// inside the container) must never reach the client.
+func respondInternal(w http.ResponseWriter, msg string, err error) {
+	slog.Error(msg, "err", err)
+	respondError(w, http.StatusInternalServerError, msg)
 }
 
 func parseID(w http.ResponseWriter, idStr string) ([16]byte, bool) {

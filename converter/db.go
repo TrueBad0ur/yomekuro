@@ -61,16 +61,30 @@ type job struct {
 
 // Atomically claims the oldest pending job, or (nil, nil) if the queue is empty.
 // SKIP LOCKED lets several workers poll the same table safely.
+//
+// Excludes a pending row whose (library_id, name) already has a 'running' row:
+// bulk-reconvert (see internal/api's reconvertSeries) can insert several
+// pending rows for the same book in one request — one per selected volume —
+// instead of the client submitting them one at a time as each finishes. This
+// clause is what turns that into a real one-at-a-time queue per book rather
+// than several volumes of the same book converting concurrently and fighting
+// over the same "-in"/output folders.
 func claimNextJob(ctx context.Context, pool *pgxpool.Pool) (*job, error) {
 	var j job
 	err := pool.QueryRow(ctx, `
 		UPDATE conversion_jobs
 		SET status = 'running', updated_at = NOW()
 		WHERE id = (
-			SELECT id FROM conversion_jobs
-			WHERE status = 'pending'
-			ORDER BY created_at
-			FOR UPDATE SKIP LOCKED
+			SELECT p.id FROM conversion_jobs p
+			WHERE p.status = 'pending'
+			  AND NOT EXISTS (
+			      SELECT 1 FROM conversion_jobs r
+			      WHERE r.status = 'running'
+			        AND r.library_id = p.library_id
+			        AND r.name = p.name
+			  )
+			ORDER BY p.created_at
+			FOR UPDATE OF p SKIP LOCKED
 			LIMIT 1
 		)
 		RETURNING id::text, name, input_path, output_path, force_ocr, volume, detector_size

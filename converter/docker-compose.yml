@@ -3,6 +3,8 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.cpu
+      additional_contexts:
+        shared: ../shared
     volumes:
       - ../library:/library
       - ./data/hf-cache:/root/.cache/huggingface
@@ -14,6 +16,8 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.gpu
+      additional_contexts:
+        shared: ../shared
     command: ["--watch", "--library", "/library"]
     restart: unless-stopped
     devices:
@@ -40,6 +44,8 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.gpu
+      additional_contexts:
+        shared: ../shared
     devices:
       - /dev/dri:/dev/dri
       - /dev/kfd:/dev/kfd

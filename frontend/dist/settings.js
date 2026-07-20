@@ -10,13 +10,24 @@ fetch('/api/auth/me').then(async r => {
   init();
 }).catch(() => { location.href = '/login'; });
 
+let activeSettingsSection = 'libraries';
+
+// Skips a poll tick entirely when the tab is hidden, or when the section
+// that consumes its result isn't the one currently shown — loadConversionJobs
+// used to fire every tick regardless, and on a finished job also refetches
+// the heavy /api/converter/reconvertable list (see loadBooksList) even if
+// nobody was looking at the Upload & Jobs section.
+function shouldPoll(section) {
+  return !document.hidden && activeSettingsSection === section;
+}
+
 function init() {
   loadLibraries();
   loadConversionJobs();
   fetch('/api/config').then(r => r.json()).then(cfg => {
-    setInterval(loadConversionJobs, cfg.jobs_poll_interval_ms || 20000);
+    setInterval(() => { if (shouldPoll('upload')) loadConversionJobs(); }, cfg.jobs_poll_interval_ms || 20000);
   }).catch(() => {
-    setInterval(loadConversionJobs, 20000);
+    setInterval(() => { if (shouldPoll('upload')) loadConversionJobs(); }, 20000);
   });
   loadUsers();
   loadSystemStatus();
@@ -30,6 +41,7 @@ const SETTINGS_SECTIONS = ['libraries', 'upload', 'books', 'status', 'users-sect
 
 function showSettingsSection(id) {
   if (!SETTINGS_SECTIONS.includes(id)) id = 'libraries';
+  activeSettingsSection = id;
 
   document.querySelectorAll('.settings-section').forEach(sec => {
     sec.classList.toggle('active', sec.id === id);
@@ -342,6 +354,26 @@ async function loadConversionJobs() {
   }
   const jobs = data.items || [];
   updateQueueControls(jobs);
+
+  const newActive = new Map(
+    jobs.filter(j => j.status === 'pending' || j.status === 'running')
+      .map(j => [j.name, { volume: j.current_volume || '', status: j.status }])
+  );
+  // A book leaving the active set (its job just finished) means its EPUBs and
+  // "needs_reconvert" flags may have changed — refetch, not just re-render,
+  // or the just-cleared badge would keep showing from stale cached data until
+  // the user happens to switch libraries. Otherwise (still active, or just
+  // started, or current_volume ticked forward) a plain re-render is enough to
+  // keep the spinner/current-volume text live between polls.
+  const justFinishedNames = [...activeJobBookNames.keys()].filter(n => !newActive.has(n));
+  const justFinished = justFinishedNames.length > 0;
+  const stillRelevant = newActive.size > 0 || activeJobBookNames.size > 0;
+  activeJobBookNames = newActive;
+  if (booksListData.length > 0) {
+    if (justFinished) loadBooksList();
+    else if (stillRelevant) renderBooksList();
+  }
+
   if (jobs.length === 0) {
     list.innerHTML = '';
     return;
@@ -428,6 +460,38 @@ const booksLibraryPicker = document.getElementById('books-library-picker');
 let selectedBooksLibraryId = '';
 let booksListData = [];
 let booksExpanded = new Set();
+// Book name -> {volume, status} for every live (pending/running) conversion
+// job. The single "Reconvert (full OCR)"/"Reconvert all" buttons still hit
+// the legacy one-volume-per-request endpoint, which rejects a second request
+// for a name that's already active — so those specific buttons stay disabled
+// up front instead of letting the click fail, and show a spinner with the
+// live volume. Bulk-select checkboxes are NOT gated on this: the bulk
+// endpoint queues additional volumes for an already-busy book on purpose.
+let activeJobBookNames = new Map();
+// Volumes checked in the bulk-reconvert selector: book name -> Set of volume
+// names. Selection is per-volume, not per-book — a book with only some
+// volumes flagged "raw scan changed" should only queue those volumes, not
+// force a full-book OCR re-run of everything else too.
+let selectedVolumes = new Map();
+
+function selectedVolumeSet(name) {
+  return selectedVolumes.get(name) || new Set();
+}
+function setVolumeSelected(name, volume, on) {
+  if (on) {
+    if (!selectedVolumes.has(name)) selectedVolumes.set(name, new Set());
+    selectedVolumes.get(name).add(volume);
+  } else if (selectedVolumes.has(name)) {
+    selectedVolumes.get(name).delete(volume);
+    if (selectedVolumes.get(name).size === 0) selectedVolumes.delete(name);
+  }
+}
+function totalSelectedVolumeCount() {
+  let n = 0;
+  for (const set of selectedVolumes.values()) n += set.size;
+  return n;
+}
+
 const booksSearchInput = document.getElementById('books-search');
 if (booksSearchInput) {
   booksSearchInput.addEventListener('input', () => renderBooksList());
@@ -459,6 +523,7 @@ function renderBooksLibraryPicker(libraries) {
     btn.textContent = lib.name;
     btn.addEventListener('click', () => {
       selectedBooksLibraryId = lib.id;
+      selectedVolumes.clear();
       booksLibraryPicker.querySelectorAll('.library-pick-btn').forEach(b => b.classList.remove('active'));
       btn.classList.add('active');
       loadBooksList();
@@ -482,6 +547,113 @@ async function loadBooksList() {
   renderBooksList();
 }
 
+// ── Bulk reconvert ────────────────────────────────────────────────────────────
+// Queuing a book's reconvert is already async server-side (multiple books queue
+// independently, the GPU just serializes actual work) — this just saves having
+// to search/click through each book one at a time to get them all queued.
+
+function updateBulkReconvertBar() {
+  const countEl = document.getElementById('bulk-reconvert-count');
+  const bulkBtn = document.getElementById('btn-bulk-reconvert');
+  const selectAllCb = document.getElementById('books-select-all');
+  if (!countEl || !bulkBtn) return;
+  const n = totalSelectedVolumeCount();
+  const bookCount = selectedVolumes.size;
+  countEl.textContent = n > 0 ? `${n} volume${n === 1 ? '' : 's'} in ${bookCount} book${bookCount === 1 ? '' : 's'} selected` : '';
+  bulkBtn.disabled = n === 0;
+  const eligible = visibleBooksList().filter(s => s.has_raw_scan);
+  if (selectAllCb) {
+    selectAllCb.checked = eligible.length > 0 &&
+      eligible.every(s => selectedVolumeSet(s.name).size === s.volumes.length);
+  }
+}
+
+// The books-search box filters what renderBooksList shows — "select all"/
+// "select flagged" must only touch that same visible set, or a search for
+// one book can silently queue reconvert jobs for unrelated books elsewhere
+// in the library that just happen to also be flagged.
+function visibleBooksList() {
+  const query = (booksSearchInput?.value || '').trim().toLowerCase();
+  return query ? booksListData.filter(s => s.name.toLowerCase().includes(query)) : booksListData;
+}
+
+const selectAllCheckbox = document.getElementById('books-select-all');
+if (selectAllCheckbox) {
+  selectAllCheckbox.addEventListener('change', (e) => {
+    const eligible = visibleBooksList().filter(s => s.has_raw_scan);
+    if (e.target.checked) eligible.forEach(s => selectedVolumes.set(s.name, new Set(s.volumes.map(v => v.name))));
+    else eligible.forEach(s => selectedVolumes.delete(s.name));
+    renderBooksList();
+    updateBulkReconvertBar();
+  });
+}
+
+// Selects only the flagged *volumes*, not every volume in a book that merely
+// has one flagged volume — the whole point being not to force a full-book
+// OCR re-run on volumes that were already fine. Scoped to the current search
+// filter, same reasoning as visibleBooksList() above.
+const selectFlaggedBtn = document.getElementById('btn-select-flagged');
+if (selectFlaggedBtn) {
+  selectFlaggedBtn.addEventListener('click', () => {
+    for (const s of visibleBooksList()) {
+      if (!s.has_raw_scan) continue;
+      for (const v of s.volumes) {
+        if (v.needs_reconvert) setVolumeSelected(s.name, v.name, true);
+      }
+    }
+    renderBooksList();
+    updateBulkReconvertBar();
+  });
+}
+
+// Queuing is a single request per book — the server (converter/db.go's
+// claimNextJob) serializes same-book jobs one at a time and persists the
+// queue in conversion_jobs, so this survives the tab closing or the whole
+// browser restarting; nothing client-side tracks "what's left to submit"
+// anymore.
+const bulkReconvertBtn = document.getElementById('btn-bulk-reconvert');
+if (bulkReconvertBtn) {
+  bulkReconvertBtn.addEventListener('click', async () => {
+    const entries = [...selectedVolumes.entries()].filter(([, set]) => set.size > 0);
+    if (entries.length === 0) return;
+    const totalVolumes = entries.reduce((sum, [, set]) => sum + set.size, 0);
+    if (!confirm(`Queue full-OCR reconvert for ${totalVolumes} volume(s) across ${entries.length} book(s)? They run one at a time per book — already-queued jobs for the same book just get more volumes appended, and everything persists even if you close this tab.`)) return;
+    bulkReconvertBtn.disabled = true;
+    bulkReconvertBtn.textContent = 'Queuing…';
+    let queued = 0;
+    const failed = [];
+    for (const [name, volSet] of entries) {
+      const book = booksListData.find(s => s.name === name);
+      // Every volume selected: one whole-book job costs the same GPU time as
+      // queuing each volume separately, and matches the "Reconvert all"
+      // button's own request shape.
+      const allSelected = book && volSet.size === book.volumes.length;
+      const body = allSelected
+        ? { library_id: selectedBooksLibraryId, name, volume: '', detector_size: 3072 }
+        : { library_id: selectedBooksLibraryId, name, volumes: [...volSet], detector_size: 3072 };
+      selectedVolumes.delete(name);
+      try {
+        const res = await fetch('/api/converter/reconvert', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        });
+        if (res.ok) queued += volSet.size;
+        else failed.push(name);
+      } catch {
+        failed.push(name);
+      }
+    }
+    bulkReconvertBtn.textContent = 'Reconvert selected (full OCR)';
+    loadConversionJobs();
+    loadBooksList();
+    updateBulkReconvertBar();
+    if (failed.length > 0) {
+      alert(`Queued ${queued}. Failed: ${failed.join(', ')}`);
+    }
+  });
+}
+
 // Rendered from the cached booksListData rather than re-fetching, so typing in
 // the search box or expanding/collapsing a book is instant. The list is kept
 // collapsed to a one-line header per book by default — a growing library
@@ -489,12 +661,12 @@ async function loadBooksList() {
 // to show per-volume rows on click.
 function renderBooksList() {
   const list = document.getElementById('books-list');
+  updateBulkReconvertBar();
   if (booksListData.length === 0) {
     list.innerHTML = '<p style="color:var(--text-dim);font-size:.88rem">No books in this library.</p>';
     return;
   }
-  const query = (booksSearchInput?.value || '').trim().toLowerCase();
-  const items = query ? booksListData.filter(s => s.name.toLowerCase().includes(query)) : booksListData;
+  const items = visibleBooksList();
   if (items.length === 0) {
     list.innerHTML = '<p style="color:var(--text-dim);font-size:.88rem">No books match your search.</p>';
     return;
@@ -521,12 +693,21 @@ function renderBooksList() {
 
     const expanded = booksExpanded.has(s.name);
     const anyNeedsReconvert = s.volumes.some(v => v.needs_reconvert);
+    const activeJob = activeJobBookNames.get(s.name);
+    const jobActive = !!activeJob;
+    const convertingBadge = activeJob
+      ? `<span class="reconvert-spinner-badge" title="${activeJob.status === 'pending' ? 'Queued, waiting for GPU' : 'Converting'}"><span class="reconvert-spinner"></span>${
+          activeJob.status === 'pending' ? 'Queued…' : (activeJob.volume ? `Converting: ${esc(activeJob.volume)}` : 'Converting…')
+        }</span>`
+      : '';
     const volumeRows = s.volumes.map(v => `
       <div class="reconvert-volume-row">
         <div class="reconvert-volume-header">
+          ${s.has_raw_scan ? `<input type="checkbox" class="volume-select-checkbox" data-name="${esc(s.name)}" data-volume="${esc(v.name)}" ${selectedVolumeSet(s.name).has(v.name) ? 'checked' : ''} title="Select this volume for bulk reconvert — queues even if a job is already running for this book">` : ''}
           <span class="reconvert-volume-name">${esc(v.name)}</span>
           ${v.modified_at ? `<span class="reconvert-volume-analyzed" title="Last analyzed">${formatAnalyzed(v.modified_at)}</span>` : ''}
-          ${v.needs_reconvert ? `<span class="reconvert-needed-badge" title="Raw scan files on disk were modified after this volume's last conversion — Reconvert to pick up the change">⚠ raw scan changed</span>` : ''}
+          ${jobActive && activeJob.volume === v.name ? convertingBadge
+            : v.needs_reconvert ? `<span class="reconvert-needed-badge" title="Raw scan files on disk were modified after this volume's last conversion — Reconvert to pick up the change">⚠ raw scan changed</span>` : ''}
         </div>
         <div class="reconvert-volume-actions">
           ${v.has_images ? `
@@ -545,18 +726,23 @@ function renderBooksList() {
               <option value="2048">2048 (faster, ~3GB GPU)</option>
               <option value="3584">Maximum (3584, ~6.3GB GPU, unverified)</option>
             </select>
-            <button class="reconvert-btn" data-name="${esc(s.name)}" data-volume="${esc(v.name)}">Reconvert (full OCR)</button>
+            <button class="reconvert-btn" data-name="${esc(s.name)}" data-volume="${esc(v.name)}" ${jobActive ? 'disabled title="A conversion job is already running for this book"' : 'title="Redoes OCR for this volume only — other volumes just rebuild fast from cache, no extra GPU time"'}>${jobActive ? 'Converting…' : 'Reconvert (full OCR)'}</button>
           ` : ''}
           <button class="job-delete-btn volume-delete-btn" data-name="${esc(s.name)}" data-volume="${esc(v.name)}">Delete</button>
         </div>
       </div>`).join('');
+    const selSet = selectedVolumeSet(s.name);
+    const allVolsSelected = s.volumes.length > 0 && selSet.size === s.volumes.length;
     return `
     <div class="library-card">
-      <button class="book-expand-toggle" data-name="${esc(s.name)}" aria-expanded="${expanded}">
-        <span class="book-expand-arrow">${expanded ? '▾' : '▸'}</span>
-        <span class="library-card-name">${esc(s.name)}</span>
-        ${anyNeedsReconvert ? `<span class="reconvert-needed-badge" title="One or more volumes' raw scan files were modified after their last conversion">⚠ raw scan changed</span>` : ''}
-      </button>
+      <div class="book-row-header">
+        ${s.has_raw_scan ? `<input type="checkbox" class="book-select-checkbox" data-name="${esc(s.name)}" ${allVolsSelected ? 'checked' : ''} title="Select/deselect all volumes in this book for bulk reconvert — queues even if a job is already running for this book">` : ''}
+        <button class="book-expand-toggle" data-name="${esc(s.name)}" aria-expanded="${expanded}">
+          <span class="book-expand-arrow">${expanded ? '▾' : '▸'}</span>
+          <span class="library-card-name">${esc(s.name)}</span>
+          ${jobActive ? convertingBadge : anyNeedsReconvert ? `<span class="reconvert-needed-badge" title="One or more volumes' raw scan files were modified after their last conversion">⚠ raw scan changed</span>` : ''}
+        </button>
+      </div>
       <div class="library-card-footer">
         <span class="library-card-count">${s.volumes.length} volume${s.volumes.length === 1 ? '' : 's'}</span>
         ${analyzedLabel}
@@ -566,16 +752,54 @@ function renderBooksList() {
               <option value="2048">2048 (faster, ~3GB GPU)</option>
               <option value="3584">Maximum (3584, ~6.3GB GPU, unverified)</option>
             </select>
-            <button class="reconvert-btn" data-name="${esc(s.name)}">Reconvert all (full OCR)</button>`
+            <button class="reconvert-btn" data-name="${esc(s.name)}" ${jobActive ? 'disabled title="A conversion job is already running for this book"' : 'title="Redoes OCR for every volume from scratch — takes as long as the first conversion"'}>${jobActive ? 'Converting…' : 'Reconvert all (full OCR)'}</button>`
           : `<span class="reconvert-no-scan" title="Raw scan no longer on disk — reconvert needs a fresh upload">no raw scan</span>`}
         <button class="reconvert-btn book-rename-btn" data-name="${esc(s.name)}">Rename</button>
         <button class="job-delete-btn book-delete-btn" data-name="${esc(s.name)}">Delete</button>
       </div>
-      <p class="reconvert-error" style="color:#e07070;font-size:.78rem;margin:.35rem 0 0" hidden></p>
+      <p class="reconvert-error" hidden></p>
       ${volumeRows ? `<div class="reconvert-volumes" ${expanded ? '' : 'hidden'}>${volumeRows}</div>` : ''}
     </div>`;
   }).join('');
+  // Indeterminate can't be set via an HTML attribute — a checkbox for a book
+  // with some but not all volumes selected needs this applied after render.
+  list.querySelectorAll('.book-select-checkbox').forEach(cb => {
+    const book = booksListData.find(s => s.name === cb.dataset.name);
+    if (!book) return;
+    const sel = selectedVolumeSet(cb.dataset.name).size;
+    cb.indeterminate = sel > 0 && sel < book.volumes.length;
+  });
 }
+
+document.getElementById('books-list').addEventListener('change', (e) => {
+  const volCb = e.target.closest('.volume-select-checkbox');
+  if (volCb) {
+    const name = volCb.dataset.name;
+    setVolumeSelected(name, volCb.dataset.volume, volCb.checked);
+    const book = booksListData.find(s => s.name === name);
+    const bookCb = document.querySelector(`.book-select-checkbox[data-name="${CSS.escape(name)}"]`);
+    if (book && bookCb) {
+      const sel = selectedVolumeSet(name).size;
+      bookCb.checked = sel === book.volumes.length;
+      bookCb.indeterminate = sel > 0 && sel < book.volumes.length;
+    }
+    updateBulkReconvertBar();
+    return;
+  }
+
+  const cb = e.target.closest('.book-select-checkbox');
+  if (!cb) return;
+  const name = cb.dataset.name;
+  const book = booksListData.find(s => s.name === name);
+  if (!book) return;
+  if (cb.checked) selectedVolumes.set(name, new Set(book.volumes.map(v => v.name)));
+  else selectedVolumes.delete(name);
+  cb.indeterminate = false;
+  document.querySelectorAll(`.volume-select-checkbox[data-name="${CSS.escape(name)}"]`).forEach(vcb => {
+    vcb.checked = cb.checked;
+  });
+  updateBulkReconvertBar();
+});
 
 document.getElementById('books-list').addEventListener('click', async (e) => {
   const toggleBtn = e.target.closest('.book-expand-toggle');
@@ -910,7 +1134,7 @@ function startSystemStatusPolling() {
 
   const apply = () => {
     if (systemStatusIntervalId) clearInterval(systemStatusIntervalId);
-    systemStatusIntervalId = setInterval(loadSystemStatus, parseInt(select.value, 10));
+    systemStatusIntervalId = setInterval(() => { if (shouldPoll('status')) loadSystemStatus(); }, parseInt(select.value, 10));
   };
   select.addEventListener('change', apply);
   if (refreshBtn) refreshBtn.addEventListener('click', () => loadSystemStatus());
@@ -1103,5 +1327,5 @@ function drawTimeAxis(ctx, t0, span, pad, plotW, h, textColor) {
 function esc(s) {
   return String(s)
     .replace(/&/g, '&amp;').replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    .replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 }

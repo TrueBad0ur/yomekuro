@@ -51,6 +51,43 @@ jobs:
           version: v2.12.2
           working-directory: .
 
+  shared:
+    name: shared module
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: shared/go.mod
+
+      - name: gofmt
+        working-directory: shared
+        run: |
+          fmt_out="$(gofmt -l .)"
+          if [ -n "$fmt_out" ]; then
+            echo "::error::gofmt needs to be run on:"
+            echo "$fmt_out"
+            exit 1
+          fi
+
+      - name: go vet
+        working-directory: shared
+        run: go vet ./...
+
+      - name: go build
+        working-directory: shared
+        run: go build ./...
+
+      - name: go test
+        working-directory: shared
+        run: go test ./...
+
+      - uses: golangci/golangci-lint-action@v9
+        with:
+          version: v2.12.2
+          working-directory: shared
+
   converter:
     name: converter module
     runs-on: ubuntu-latest
@@ -78,6 +115,10 @@ jobs:
       - name: go build
         working-directory: converter
         run: go build ./...
+
+      - name: go test
+        working-directory: converter
+        run: go test ./...
 
       - uses: golangci/golangci-lint-action@v9
         with:

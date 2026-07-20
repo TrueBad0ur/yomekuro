@@ -82,7 +82,7 @@ func (s *Server) listBooks(w http.ResponseWriter, r *http.Request) {
 
 	result, err := db.ListBooks(r.Context(), s.db, f)
 	if err != nil {
-		respondError(w, http.StatusInternalServerError, err.Error())
+		respondInternal(w, "internal error", err)
 		return
 	}
 
@@ -106,7 +106,7 @@ func (s *Server) getBook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err != nil {
-		respondError(w, http.StatusInternalServerError, err.Error())
+		respondInternal(w, "internal error", err)
 		return
 	}
 	respond(w, toBookDTO(b))
@@ -123,7 +123,7 @@ func (s *Server) getBookCover(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err != nil {
-		respondError(w, http.StatusInternalServerError, err.Error())
+		respondInternal(w, "internal error", err)
 		return
 	}
 	if b.CoverPath == "" {
@@ -157,7 +157,7 @@ func (s *Server) getBookFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err != nil {
-		respondError(w, http.StatusInternalServerError, err.Error())
+		respondInternal(w, "internal error", err)
 		return
 	}
 	if _, err := os.Stat(b.Path); err != nil {
@@ -178,7 +178,7 @@ func (s *Server) listSeries(w http.ResponseWriter, r *http.Request) {
 	excludeHTML := r.URL.Query().Get("exclude_html") == "1"
 	series, err := db.ListSeries(r.Context(), s.db, r.URL.Query().Get("library"), excludeHTML)
 	if err != nil {
-		respondError(w, http.StatusInternalServerError, err.Error())
+		respondInternal(w, "internal error", err)
 		return
 	}
 
@@ -205,7 +205,7 @@ func (s *Server) getBookTags(w http.ResponseWriter, r *http.Request) {
 	}
 	tags, err := db.GetBookTags(r.Context(), s.db, id)
 	if err != nil {
-		respondError(w, http.StatusInternalServerError, err.Error())
+		respondInternal(w, "internal error", err)
 		return
 	}
 	if tags == nil {
@@ -230,7 +230,7 @@ func (s *Server) setBookTags(w http.ResponseWriter, r *http.Request) {
 		req.Tags = []string{}
 	}
 	if err := db.SetBookTags(r.Context(), s.db, id, req.Tags); err != nil {
-		respondError(w, http.StatusInternalServerError, err.Error())
+		respondInternal(w, "internal error", err)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -239,7 +239,7 @@ func (s *Server) setBookTags(w http.ResponseWriter, r *http.Request) {
 func (s *Server) listTags(w http.ResponseWriter, r *http.Request) {
 	tags, err := db.ListTags(r.Context(), s.db)
 	if err != nil {
-		respondError(w, http.StatusInternalServerError, err.Error())
+		respondInternal(w, "internal error", err)
 		return
 	}
 	if tags == nil {
@@ -256,7 +256,7 @@ func (s *Server) getSeriesBooks(w http.ResponseWriter, r *http.Request) {
 		Limit:  200,
 	})
 	if err != nil {
-		respondError(w, http.StatusInternalServerError, err.Error())
+		respondInternal(w, "internal error", err)
 		return
 	}
 	respond(w, map[string]any{

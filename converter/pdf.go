@@ -8,15 +8,9 @@ import (
 	"path/filepath"
 	"strings"
 	"unicode"
+
+	shared "github.com/truebad0ur/yomekuro-shared"
 )
-
-// Average non-whitespace chars per page above which a PDF counts as having a
-// real text layer rather than being scanned images.
-const textPDFMinCharsPerPage = 20
-
-// Guards against a present-but-garbage text layer: scans run through a non-
-// Japanese-aware OCR carry dense Latin noise that passes a raw char count.
-const textPDFMinJapaneseFraction = 0.3
 
 // Each top-level "<name>.pdf" is one volume, rasterized to page images. One with
 // a real text layer is built straight from that text; a scan is left to mokuro.
@@ -95,32 +89,14 @@ func pdfHasTextLayer(pdfPath string) (bool, error) {
 			continue
 		}
 		chars++
-		if isJapanese(r) {
+		if shared.IsJapanese(r) {
 			jaChars++
 		}
 	}
-	if chars/pages < textPDFMinCharsPerPage {
+	if chars/pages < shared.MinCharsPerPage {
 		return false, nil
 	}
-	return float64(jaChars)/float64(chars) >= textPDFMinJapaneseFraction, nil
-}
-
-// Whether r is hiragana, katakana, kanji, or CJK/fullwidth punctuation.
-func isJapanese(r rune) bool {
-	switch {
-	case r >= 0x3040 && r <= 0x30FF: // Hiragana + Katakana
-		return true
-	case r >= 0x4E00 && r <= 0x9FFF: // CJK Unified Ideographs
-		return true
-	case r >= 0x3400 && r <= 0x4DBF: // CJK Extension A
-		return true
-	case r >= 0x3000 && r <= 0x303F: // CJK punctuation
-		return true
-	case r >= 0xFF00 && r <= 0xFFEF: // Halfwidth/fullwidth forms
-		return true
-	default:
-		return false
-	}
+	return float64(jaChars)/float64(chars) >= shared.MinJapaneseFraction, nil
 }
 
 func pdfPageCount(pdfPath string) (int, error) {

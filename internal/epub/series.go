@@ -4,11 +4,11 @@ import (
 	"archive/zip"
 	"math"
 	"path/filepath"
-	"regexp"
 	"strconv"
 	"strings"
 
 	"github.com/beevik/etree"
+	shared "github.com/truebad0ur/yomekuro-shared"
 )
 
 // Series name and index, in order: EPUB3 belongs-to-collection, Calibre's EPUB2
@@ -66,30 +66,13 @@ func parseSeries(doc *etree.Document, filePath, libraryPath string) (name string
 	return
 }
 
-var numRe = regexp.MustCompile(`\d+(?:\.\d+)?`)
-
 // The last number in a filename, as series index. Japanese releases often use
-// fullwidth digits ("（１２）"), which \d alone silently misses.
+// fullwidth digits ("（１２）"), which \d alone silently misses — shared.LastNumber
+// normalizes those first (see its doc comment for why this lives there).
 func indexFromFilename(filename string) float64 {
 	ext := filepath.Ext(filename)
-	base := toHalfwidthDigits(strings.TrimSuffix(filename, ext))
-	nums := numRe.FindAllString(base, -1)
-	if len(nums) == 0 {
-		return 0
-	}
-	f, _ := strconv.ParseFloat(nums[len(nums)-1], 64)
+	f, _ := shared.LastNumber(strings.TrimSuffix(filename, ext))
 	return f
-}
-
-// toHalfwidthDigits maps fullwidth digits (U+FF10-U+FF19) to ASCII '0'-'9',
-// leaving everything else untouched.
-func toHalfwidthDigits(s string) string {
-	return strings.Map(func(r rune) rune {
-		if r >= '０' && r <= '９' {
-			return r - '０' + '0'
-		}
-		return r
-	}, s)
 }
 
 // computePageCount uses the Readium method: 1 page per 1024 bytes of compressed spine content.

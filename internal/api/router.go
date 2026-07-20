@@ -23,6 +23,7 @@ type Server struct {
 	zips               *zipCache
 	jobsPollIntervalMS int
 	sysStats           *sysstats.Collector
+	loginLimiter       *loginLimiter
 }
 
 func NewRouter(pool *pgxpool.Pool, sc *scanner.Scanner, w *scanner.Watcher, dataDir, backupDir string, zipCacheSize, jobsPollIntervalMS int) http.Handler {
@@ -40,6 +41,7 @@ func NewRouter(pool *pgxpool.Pool, sc *scanner.Scanner, w *scanner.Watcher, data
 		zips:               newZipCache(zipCacheSize),
 		jobsPollIntervalMS: jobsPollIntervalMS,
 		sysStats:           stats,
+		loginLimiter:       newLoginLimiter(),
 	}
 
 	r := chi.NewRouter()

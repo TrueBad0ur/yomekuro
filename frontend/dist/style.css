@@ -640,7 +640,7 @@ body.page-login {
 
 /* ── Settings page ────────────────────────────────────────────────────────── */
 
-body.page-settings { max-width: 1080px; margin: 0 auto; padding: 0 1.5rem 3rem; }
+body.page-settings { max-width: 1600px; width: 95%; margin: 0 auto; padding: 0 1.5rem 3rem; }
 
 .settings-page-header {
   display: flex;
@@ -852,6 +852,16 @@ body.page-settings { max-width: 1080px; margin: 0 auto; padding: 0 1.5rem 3rem; 
 }
 .reconvert-volume-actions { display: flex; gap: 0.4rem; flex-shrink: 0; align-items: center; flex-wrap: wrap; }
 .reconvert-volume-analyzed { font-size: 0.76rem; color: var(--text-dim); flex-shrink: 0; }
+.reconvert-error {
+  color: #e07070;
+  font-size: 0.85rem;
+  font-weight: 600;
+  margin: 0.5rem 0 0;
+  padding: 0.4rem 0.6rem;
+  background: rgba(224, 112, 112, 0.12);
+  border: 1px solid rgba(224, 112, 112, 0.4);
+  border-radius: 6px;
+}
 .reconvert-needed-badge {
   font-size: 0.76rem;
   color: #c9820a;
@@ -861,6 +871,31 @@ body.page-settings { max-width: 1080px; margin: 0 auto; padding: 0 1.5rem 3rem; 
   padding: 0.1rem 0.4rem;
   flex-shrink: 0;
   white-space: nowrap;
+}
+.reconvert-spinner-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.76rem;
+  color: var(--accent);
+  background: rgba(99, 140, 255, 0.12);
+  border: 1px solid rgba(99, 140, 255, 0.4);
+  border-radius: 4px;
+  padding: 0.1rem 0.4rem;
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+.reconvert-spinner {
+  width: 0.7em;
+  height: 0.7em;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 50%;
+  display: inline-block;
+  animation: reconvert-spin 0.7s linear infinite;
+}
+@keyframes reconvert-spin {
+  to { transform: rotate(360deg); }
 }
 .dl-format-picker, .detector-size-picker {
   padding: 0.3rem 0.5rem;
@@ -872,6 +907,28 @@ body.page-settings { max-width: 1080px; margin: 0 auto; padding: 0 1.5rem 3rem; 
 }
 
 .upload-hint { color: var(--text-dim); font-size: 0.82rem; margin: 0 0 1.1rem; }
+
+.bulk-reconvert-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  margin-bottom: 0.9rem;
+  padding: 0.6rem 0.75rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+.bulk-reconvert-select-all {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+.bulk-reconvert-count { color: var(--text-dim); font-size: 0.82rem; }
+.book-row-header { display: flex; align-items: center; gap: 0.5rem; }
+.book-select-checkbox { flex-shrink: 0; cursor: pointer; }
 
 .upload-field { margin-bottom: 0.9rem; }
 .upload-field-label {

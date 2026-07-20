@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	shared "github.com/truebad0ur/yomekuro-shared"
 )
 
 // Two independent poll loops — the upload queue and the manual-folder scan —
@@ -248,10 +249,10 @@ func countVolumes(dir string) (int, error) {
 			}
 			continue
 		}
-		switch strings.ToLower(filepath.Ext(e.Name())) {
-		case ".jpg", ".jpeg", ".png", ".webp", ".jxl":
+		switch {
+		case shared.IsImageExt(filepath.Ext(e.Name())):
 			hasImage = true
-		case ".pdf":
+		case strings.ToLower(filepath.Ext(e.Name())) == ".pdf":
 			pdfs++
 		}
 	}

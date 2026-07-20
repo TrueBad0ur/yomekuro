@@ -82,6 +82,20 @@ func main() {
 		}
 	}
 
+	// Nothing else prunes the sessions table — without this, expired rows
+	// (30-day TTL) accumulate forever.
+	go func() {
+		ticker := time.NewTicker(time.Hour)
+		defer ticker.Stop()
+		for range ticker.C {
+			if n, err := auth.SweepExpiredSessions(ctx, pool); err != nil {
+				slog.Warn("session sweep failed", "err", err)
+			} else if n > 0 {
+				slog.Info("swept expired sessions", "count", n)
+			}
+		}
+	}()
+
 	router := api.NewRouter(pool, sc, watcher, cfg.Data, cfg.BackupDir, cfg.ZipCacheSize, cfg.JobsPollIntervalMS)
 
 	// WriteTimeout is deliberately unset: it would cut off large downloads to slow

@@ -2,12 +2,28 @@ package api
 
 import (
 	"encoding/json"
+	"fmt"
+	"net"
 	"net/http"
 	"time"
 
 	"github.com/truebad0ur/yomekuro/internal/auth"
 	"github.com/truebad0ur/yomekuro/internal/db"
 )
+
+// dummyPasswordHash lets login run bcrypt.CompareHashAndPassword even when
+// the username doesn't exist, so the response time for "wrong password" and
+// "no such user" doesn't leak which one happened (a real hash of an
+// unguessable, unused string — never a valid login on its own).
+var dummyPasswordHash, _ = auth.HashPassword("yomekuro-timing-mitigation-not-a-real-password")
+
+func clientIP(r *http.Request) string {
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		return r.RemoteAddr
+	}
+	return host
+}
 
 func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 	var req struct {
@@ -23,15 +39,28 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	limitKey := clientIP(r) + ":" + req.Username
+	if s.loginLimiter.blocked(limitKey) {
+		respondError(w, http.StatusTooManyRequests, "too many failed login attempts, try again later")
+		return
+	}
+
 	user, hash, err := auth.GetUserByUsername(r.Context(), s.db, req.Username)
 	if err != nil {
+		// Run a real bcrypt compare against a dummy hash even though there's
+		// no such user, so this branch takes roughly as long as the
+		// wrong-password branch below — see dummyPasswordHash's comment.
+		auth.CheckPassword(dummyPasswordHash, req.Password)
+		s.loginLimiter.recordFailure(limitKey)
 		respondError(w, http.StatusUnauthorized, "invalid credentials")
 		return
 	}
 	if !auth.CheckPassword(hash, req.Password) {
+		s.loginLimiter.recordFailure(limitKey)
 		respondError(w, http.StatusUnauthorized, "invalid credentials")
 		return
 	}
+	s.loginLimiter.reset(limitKey)
 
 	token, err := auth.CreateSession(r.Context(), s.db, user.ID)
 	if err != nil {
@@ -58,6 +87,10 @@ func (s *Server) register(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.Username == "" || req.Password == "" {
 		respondError(w, http.StatusBadRequest, "username and password required")
+		return
+	}
+	if len(req.Password) < auth.MinPasswordLength {
+		respondError(w, http.StatusBadRequest, fmt.Sprintf("password must be at least %d characters", auth.MinPasswordLength))
 		return
 	}
 	user, err := auth.CreateUser(r.Context(), s.db, req.Username, req.Password, false)

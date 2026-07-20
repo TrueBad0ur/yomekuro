@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
@@ -12,7 +13,7 @@ import (
 func (s *Server) listUsers(w http.ResponseWriter, r *http.Request) {
 	users, err := auth.ListUsers(r.Context(), s.db)
 	if err != nil {
-		respondError(w, http.StatusInternalServerError, err.Error())
+		respondInternal(w, "internal error", err)
 		return
 	}
 	type userDTO struct {
@@ -45,6 +46,10 @@ func (s *Server) createUser(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.Username == "" || req.Password == "" {
 		respondError(w, http.StatusBadRequest, "username and password required")
+		return
+	}
+	if len(req.Password) < auth.MinPasswordLength {
+		respondError(w, http.StatusBadRequest, fmt.Sprintf("password must be at least %d characters", auth.MinPasswordLength))
 		return
 	}
 	user, err := auth.CreateUser(r.Context(), s.db, req.Username, req.Password, req.IsAdmin)
@@ -82,8 +87,34 @@ func (s *Server) updateUser(w http.ResponseWriter, r *http.Request) {
 	if req.Password != nil {
 		password = *req.Password
 	}
+	if password != "" && len(password) < auth.MinPasswordLength {
+		respondError(w, http.StatusBadRequest, fmt.Sprintf("password must be at least %d characters", auth.MinPasswordLength))
+		return
+	}
+	// Refuse to demote the last remaining admin — otherwise the instance
+	// locks everyone out of Settings until the container is restarted with
+	// YOMEKURO_ADMIN_PASSWORD set (auth.EnsureAdmin only acts when there are
+	// zero admins, so it doesn't self-heal a "1 admin demotes self" case).
+	if req.IsAdmin != nil && !*req.IsAdmin {
+		wasAdmin, err := auth.IsAdmin(r.Context(), s.db, id)
+		if err != nil {
+			respondInternal(w, "internal error", err)
+			return
+		}
+		if wasAdmin {
+			count, err := auth.CountAdmins(r.Context(), s.db)
+			if err != nil {
+				respondInternal(w, "internal error", err)
+				return
+			}
+			if count <= 1 {
+				respondError(w, http.StatusBadRequest, "cannot remove admin status from the last remaining admin")
+				return
+			}
+		}
+	}
 	if err := auth.UpdateUser(r.Context(), s.db, id, username, password, req.IsAdmin); err != nil {
-		respondError(w, http.StatusInternalServerError, err.Error())
+		respondInternal(w, "internal error", err)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -101,7 +132,7 @@ func (s *Server) deleteUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := auth.DeleteUser(r.Context(), s.db, id); err != nil {
-		respondError(w, http.StatusInternalServerError, err.Error())
+		respondInternal(w, "internal error", err)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)

@@ -238,8 +238,8 @@ func UpsertBook(ctx context.Context, pool *pgxpool.Pool, b Book) error {
 func GetBookByPath(ctx context.Context, pool *pgxpool.Pool, path string) (Book, bool, error) {
 	var b Book
 	err := pool.QueryRow(ctx,
-		`SELECT id, file_size, file_hash, file_modified FROM books WHERE path = $1`, path,
-	).Scan(&b.ID, &b.FileSize, &b.FileHash, &b.FileModified)
+		`SELECT id, file_size, file_hash, file_modified, cover_path FROM books WHERE path = $1`, path,
+	).Scan(&b.ID, &b.FileSize, &b.FileHash, &b.FileModified, &b.CoverPath)
 	if err == pgx.ErrNoRows {
 		return Book{}, false, nil
 	}
@@ -258,12 +258,30 @@ func UpdateFileStats(ctx context.Context, pool *pgxpool.Pool, id [16]byte, size 
 	return err
 }
 
-func DeleteBooksNotIn(ctx context.Context, pool *pgxpool.Pool, libraryID [16]byte, paths []string) error {
-	_, err := pool.Exec(ctx,
-		`DELETE FROM books WHERE library_id = $1 AND NOT (path = ANY($2))`,
+// DeleteBooksNotIn removes books whose file vanished from disk and returns the
+// cover_path of every deleted row (skipping empty ones) so the caller can also
+// remove the now-orphaned cover files — cover images are stored on disk
+// independently of the DB row and are never cleaned up otherwise.
+func DeleteBooksNotIn(ctx context.Context, pool *pgxpool.Pool, libraryID [16]byte, paths []string) ([]string, error) {
+	rows, err := pool.Query(ctx,
+		`DELETE FROM books WHERE library_id = $1 AND NOT (path = ANY($2)) RETURNING cover_path`,
 		libraryID, paths,
 	)
-	return err
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var covers []string
+	for rows.Next() {
+		var c string
+		if err := rows.Scan(&c); err != nil {
+			return nil, err
+		}
+		if c != "" {
+			covers = append(covers, c)
+		}
+	}
+	return covers, rows.Err()
 }
 
 func CountBooks(ctx context.Context, pool *pgxpool.Pool, libraryID [16]byte) (int, error) {
@@ -272,9 +290,17 @@ func CountBooks(ctx context.Context, pool *pgxpool.Pool, libraryID [16]byte) (in
 	return n, err
 }
 
-func DeleteBookByPath(ctx context.Context, pool *pgxpool.Pool, path string) error {
-	_, err := pool.Exec(ctx, `DELETE FROM books WHERE path = $1`, path)
-	return err
+// DeleteBookByPath removes the book and returns its cover_path (empty if it
+// had none, or if no row matched) so the caller can also delete the cover file.
+func DeleteBookByPath(ctx context.Context, pool *pgxpool.Pool, path string) (string, error) {
+	var cover string
+	err := pool.QueryRow(ctx,
+		`DELETE FROM books WHERE path = $1 RETURNING cover_path`, path,
+	).Scan(&cover)
+	if err == pgx.ErrNoRows {
+		return "", nil
+	}
+	return cover, err
 }
 
 // RenameSeriesUnderPath sets series_name for every book at or under pathOrDir

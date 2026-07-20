@@ -49,6 +49,42 @@ func CreateReconvertJob(ctx context.Context, pool *pgxpool.Pool, libraryID [16]b
 	return j, err
 }
 
+// CreateReconvertJobsBulk queues a full OCR re-run for several volumes of the
+// same book in one shot — one row per volume, all 'pending' immediately.
+// Unlike CreateReconvertJob, this does NOT check ConversionJobNameTaken: that
+// guard exists to stop uploads/deletes from racing an active job, but here
+// piling up several pending rows for the same (library_id, name) is exactly
+// the point — converter/db.go's claimNextJob only ever runs one of them at a
+// time (never claims a pending row while another with the same name is
+// 'running'), so this is genuinely a queue, not a way to run volumes of one
+// book concurrently and fight over its shared "-in"/output folders.
+func CreateReconvertJobsBulk(ctx context.Context, pool *pgxpool.Pool, libraryID [16]byte, name, inputPath, outputPath string, volumes []string, detectorSize int) ([]ConversionJob, error) {
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback(ctx)
+
+	jobs := make([]ConversionJob, 0, len(volumes))
+	for _, volume := range volumes {
+		var j ConversionJob
+		err := tx.QueryRow(ctx,
+			`INSERT INTO conversion_jobs (library_id, name, input_path, output_path, force_ocr, volume, detector_size)
+			 VALUES ($1, $2, $3, $4, true, $5, $6)
+			 RETURNING id, library_id, name, input_path, output_path, status, error, current_volume, stop_requested, force_ocr, volume, detector_size, created_at, updated_at`,
+			libraryID, name, inputPath, outputPath, volume, detectorSize,
+		).Scan(&j.ID, &j.LibraryID, &j.Name, &j.InputPath, &j.OutputPath, &j.Status, &j.Error, &j.CurrentVolume, &j.StopRequested, &j.ForceOCR, &j.Volume, &j.DetectorSize, &j.CreatedAt, &j.UpdatedAt)
+		if err != nil {
+			return nil, err
+		}
+		jobs = append(jobs, j)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, err
+	}
+	return jobs, nil
+}
+
 func ListConversionJobs(ctx context.Context, pool *pgxpool.Pool) ([]ConversionJob, error) {
 	rows, err := pool.Query(ctx,
 		`SELECT id, library_id, name, input_path, output_path, status, error, current_volume, stop_requested, force_ocr, volume, detector_size, created_at, updated_at

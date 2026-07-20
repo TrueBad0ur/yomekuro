@@ -12,6 +12,8 @@ import (
 	"regexp"
 	"strings"
 	"time"
+
+	shared "github.com/truebad0ur/yomekuro-shared"
 )
 
 // mokuroRetries, mokuroRetryDelay, and progressEvery are defined in config.go
@@ -123,7 +125,6 @@ func reconcileOCRCache(mokuroDir string) {
 	if err != nil {
 		return
 	}
-	imgExts := map[string]bool{".jpg": true, ".jpeg": true, ".png": true, ".webp": true}
 	for _, e := range entries {
 		if !e.IsDir() || e.Name() == "_ocr" {
 			continue
@@ -136,7 +137,7 @@ func reconcileOCRCache(mokuroDir string) {
 
 		current := map[string]bool{}
 		filepath.WalkDir(volDir, func(path string, d os.DirEntry, err error) error {
-			if err != nil || d.IsDir() || !imgExts[strings.ToLower(filepath.Ext(path))] {
+			if err != nil || d.IsDir() || !shared.IsImageExt(filepath.Ext(path)) {
 				return nil
 			}
 			if rel, err := filepath.Rel(volDir, path); err == nil {
@@ -158,7 +159,63 @@ func reconcileOCRCache(mokuroDir string) {
 			}
 			return nil
 		})
+
+		reconcileStaleMokuroFile(mokuroDir, e.Name(), current)
 	}
+}
+
+// reconcileStaleMokuroFile drops page entries from an existing "<volume>.mokuro"
+// file whose image no longer exists on disk. mokuro's own process_volume() reads
+// this file *first* and re-seeds the per-page OCR cache from its embedded page
+// data before checking what's actually on disk (see mokuro_generator.py) — so a
+// stale .mokuro file undoes the cache cleanup right above, recreating exactly
+// the entries just removed, and generate_mokuro_file() then throws an uncaught
+// KeyError trying to match a phantom entry against the current (smaller) set of
+// images. Hit for real: BE BLUES v14 shrank from 196 to 193 pages between OCR
+// passes (raw scan cleanup), leaving 3 stale pages in the old .mokuro file.
+func reconcileStaleMokuroFile(mokuroDir, volume string, current map[string]bool) {
+	path := filepath.Join(mokuroDir, volume+".mokuro")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return
+	}
+	var doc map[string]any
+	if err := json.Unmarshal(data, &doc); err != nil {
+		return
+	}
+	pages, ok := doc["pages"].([]any)
+	if !ok {
+		return
+	}
+	kept := make([]any, 0, len(pages))
+	dropped := 0
+	for _, p := range pages {
+		page, ok := p.(map[string]any)
+		if !ok {
+			kept = append(kept, p)
+			continue
+		}
+		imgPath, _ := page["img_path"].(string)
+		key := strings.TrimSuffix(imgPath, filepath.Ext(imgPath))
+		if imgPath == "" || current[key] {
+			kept = append(kept, p)
+		} else {
+			dropped++
+		}
+	}
+	if dropped == 0 {
+		return
+	}
+	doc["pages"] = kept
+	out, err := json.Marshal(doc)
+	if err != nil {
+		return
+	}
+	if err := os.WriteFile(path, out, 0644); err != nil {
+		slog.Warn("could not rewrite stale mokuro file", "path", path, "err", err)
+		return
+	}
+	slog.Info("removed stale pages from mokuro file", "path", path, "dropped", dropped)
 }
 
 func runMokuro(ctx context.Context, inputDir string, volumeDirs []string, noCache bool, detectorSize int, onVolume func(string)) error {
@@ -167,10 +224,12 @@ func runMokuro(ctx context.Context, inputDir string, volumeDirs []string, noCach
 	if noCache && len(volumeDirs) > 0 {
 		for _, vd := range volumeDirs {
 			mokuroFile := filepath.Join(inputDir, filepath.Base(vd)+".mokuro")
-			if err := os.Remove(mokuroFile); err != nil && !os.IsNotExist(err) {
-				slog.Warn("could not remove mokuro file", "path", mokuroFile, "err", err)
-			} else {
+			if err := os.Remove(mokuroFile); err == nil {
 				slog.Info("cleared mokuro cache", "path", mokuroFile)
+			} else if os.IsNotExist(err) {
+				slog.Debug("mokuro cache already absent", "path", mokuroFile)
+			} else {
+				slog.Warn("could not remove mokuro file", "path", mokuroFile, "err", err)
 			}
 			ocrDir := filepath.Join(inputDir, "_ocr", filepath.Base(vd))
 			if err := os.RemoveAll(ocrDir); err != nil {

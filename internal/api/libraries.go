@@ -13,7 +13,7 @@ import (
 func (s *Server) listLibraries(w http.ResponseWriter, r *http.Request) {
 	libs, err := db.ListLibraries(r.Context(), s.db)
 	if err != nil {
-		respondError(w, http.StatusInternalServerError, err.Error())
+		respondInternal(w, "could not list libraries", err)
 		return
 	}
 	type libDTO struct {
@@ -49,7 +49,7 @@ func (s *Server) createLibrary(w http.ResponseWriter, r *http.Request) {
 	}
 	lib, err := db.CreateLibrary(r.Context(), s.db, req.Name, req.Path)
 	if err != nil {
-		respondError(w, http.StatusInternalServerError, err.Error())
+		respondInternal(w, "could not create library", err)
 		return
 	}
 	if s.watcher != nil {
@@ -69,7 +69,7 @@ func (s *Server) deleteLibrary(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := db.DeleteLibrary(r.Context(), s.db, id); err != nil {
-		respondError(w, http.StatusInternalServerError, err.Error())
+		respondInternal(w, "could not delete library", err)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)

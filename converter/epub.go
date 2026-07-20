@@ -14,6 +14,8 @@ import (
 	"strings"
 	"time"
 	"unicode/utf8"
+
+	shared "github.com/truebad0ur/yomekuro-shared"
 )
 
 type imgEntry struct {
@@ -29,7 +31,7 @@ var reVolSuffix = regexp.MustCompile(`(?i)(\s+(v\.?\s*|vol\.?\s*|volume\s*)?\d+|
 // Strips a trailing volume number: "Dungeon Meshi v01" → "Dungeon Meshi",
 // "葬送のフリーレン（０５）" → "葬送のフリーレン".
 func seriesName(volumeName string) string {
-	s := reVolSuffix.ReplaceAllString(strings.TrimSpace(toHalfwidthVolume(volumeName)), "")
+	s := reVolSuffix.ReplaceAllString(strings.TrimSpace(shared.ToHalfwidth(volumeName)), "")
 	s = strings.TrimSpace(s)
 	if s == "" {
 		return volumeName
@@ -39,7 +41,7 @@ func seriesName(volumeName string) string {
 
 // volumeIndex extracts a numeric index from a volume name, e.g. "Dungeon Meshi v02" → 2.
 func volumeIndex(name string) float64 {
-	matches := reVolSuffix.FindString(toHalfwidthVolume(name))
+	matches := reVolSuffix.FindString(shared.ToHalfwidth(name))
 	nums := regexp.MustCompile(`\d+`).FindString(matches)
 	if nums == "" {
 		return 1
@@ -56,7 +58,7 @@ var reLeadingNum = regexp.MustCompile(`^\s*0*(\d+)`)
 // A leading number: "1 Kage no koibito" → 1. For anthologies, where the number
 // comes first and the rest of the name is an unrelated per-item title.
 func leadingVolumeIndex(name string) (float64, bool) {
-	m := reLeadingNum.FindStringSubmatch(toHalfwidthVolume(name))
+	m := reLeadingNum.FindStringSubmatch(shared.ToHalfwidth(name))
 	if m == nil {
 		return 0, false
 	}
@@ -65,21 +67,6 @@ func leadingVolumeIndex(name string) (float64, bool) {
 		return 0, false
 	}
 	return float64(n), true
-}
-
-// Maps fullwidth digits and parens to ASCII, leaving everything else alone.
-func toHalfwidthVolume(s string) string {
-	return strings.Map(func(r rune) rune {
-		switch {
-		case r >= '０' && r <= '９':
-			return r - '０' + '0'
-		case r == '（':
-			return '('
-		case r == '）':
-			return ')'
-		}
-		return r
-	}, s)
 }
 
 func buildEPUB(vol MokuroVolume, inputDir, outPath string) error {

@@ -34,9 +34,16 @@ func (s *Scanner) ScanLibrary(ctx context.Context, lib db.Library) error {
 	start := time.Now()
 	var found []string
 	updated := 0
+	var walkFailed bool
 
 	err := filepath.WalkDir(lib.Path, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
+			if path == lib.Path {
+				// Root path itself is inaccessible (unmounted, permissions) —
+				// fatal: don't let the walk silently report "0 files found".
+				walkFailed = true
+				return err
+			}
 			slog.Warn("scan: walk error", "path", path, "err", err)
 			return nil
 		}
@@ -51,12 +58,31 @@ func (s *Scanner) ScanLibrary(ctx context.Context, lib db.Library) error {
 		}
 		return nil
 	})
-	if err != nil {
+	if err != nil || walkFailed {
 		return fmt.Errorf("scanner: walk %s: %w", lib.Path, err)
 	}
 
-	if err := db.DeleteBooksNotIn(ctx, s.pool, lib.ID, found); err != nil {
+	existing, cerr := db.CountBooks(ctx, s.pool, lib.ID)
+	if cerr != nil {
+		return fmt.Errorf("scanner: count existing: %w", cerr)
+	}
+	if len(found) == 0 && existing > 0 {
+		return fmt.Errorf("scanner: %s: found 0 files but %d books exist in DB — "+
+			"refusing to delete (path not mounted?)", lib.Path, existing)
+	}
+	if existing > 0 && len(found) < existing*4/5 {
+		slog.Warn("scan: large drop in book count, verify library path is correct",
+			"library", lib.Name, "existing", existing, "found", len(found))
+	}
+
+	removedCovers, err := db.DeleteBooksNotIn(ctx, s.pool, lib.ID, found)
+	if err != nil {
 		return fmt.Errorf("scanner: cleanup: %w", err)
+	}
+	for _, c := range removedCovers {
+		if rmErr := os.Remove(c); rmErr != nil && !os.IsNotExist(rmErr) {
+			slog.Warn("scan: could not remove orphaned cover", "path", c, "err", rmErr)
+		}
 	}
 
 	slog.Info("scan complete",
@@ -194,6 +220,14 @@ func (s *Scanner) processFile(ctx context.Context, lib db.Library, filePath stri
 	}
 	if err := db.SetBookTags(ctx, s.pool, bookID, tags); err != nil {
 		slog.Warn("set tags", "path", filePath, "err", err)
+	}
+
+	// A re-parsed file can produce a cover under a new path (e.g. media type
+	// changed jpg -> png after reconvert) — the old file is now orphaned.
+	if found && existing.CoverPath != "" && existing.CoverPath != rec.CoverPath {
+		if err := os.Remove(existing.CoverPath); err != nil && !os.IsNotExist(err) {
+			slog.Warn("scan: could not remove superseded cover", "path", existing.CoverPath, "err", err)
+		}
 	}
 
 	return true, nil

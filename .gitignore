@@ -34,3 +34,4 @@ library/pdf/*
 # project-internal docs
 debug/
 CLAUDE.md
+TODO.md
