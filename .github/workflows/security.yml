@@ -49,7 +49,18 @@ jobs:
 
       - name: Install gosec
         continue-on-error: true
+        # actions/setup-go pins GOTOOLCHAIN=local to the exact version named by
+        # go-version-file (this repo's go.mod pins 1.25.0) — but "gosec@latest"
+        # tracks upstream and periodically bumps its own go.mod's minimum Go
+        # version ahead of that pin (hit for real: gosec v2.28.0 requires
+        # go >= 1.25.8), which GOTOOLCHAIN=local then refuses to auto-fetch,
+        # so the install silently fails with "command not found" one step
+        # later. auto here only affects installing the gosec binary itself,
+        # not this repo's own build/test/vet — which still run against the
+        # go.mod-pinned toolchain everywhere else in this workflow file.
         run: go install github.com/securego/gosec/v2/cmd/gosec@latest
+        env:
+          GOTOOLCHAIN: auto
 
       - name: Run gosec
         working-directory: ${{ matrix.dir }}
