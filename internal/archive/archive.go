@@ -14,6 +14,7 @@ import (
 
 	"github.com/bodgit/sevenzip"
 	"github.com/nwaples/rardecode/v2"
+	shared "github.com/truebad0ur/yomekuro-shared"
 	"github.com/ulikunitz/xz"
 )
 
@@ -81,7 +82,7 @@ func extractZip(archivePath, destDir string) error {
 	defer zr.Close()
 
 	for _, f := range zr.File {
-		if isJunk(f.Name) {
+		if shared.IsJunkName(f.Name) {
 			continue
 		}
 		destPath, err := safeJoin(destDir, f.Name)
@@ -138,7 +139,7 @@ func extractTar(r io.Reader, destDir string) error {
 		if err != nil {
 			return fmt.Errorf("archive: tar: %w", err)
 		}
-		if isJunk(hdr.Name) {
+		if shared.IsJunkName(hdr.Name) {
 			continue
 		}
 		destPath, err := safeJoin(destDir, hdr.Name)
@@ -183,7 +184,7 @@ func extract7z(archivePath, destDir string) error {
 	defer zr.Close()
 
 	for _, f := range zr.File {
-		if isJunk(f.Name) {
+		if shared.IsJunkName(f.Name) {
 			continue
 		}
 		destPath, err := safeJoin(destDir, f.Name)
@@ -218,7 +219,7 @@ func extractRar(archivePath, destDir string) error {
 		if err != nil {
 			return fmt.Errorf("archive: rar: %w", err)
 		}
-		if isJunk(hdr.Name) {
+		if shared.IsJunkName(hdr.Name) {
 			continue
 		}
 		destPath, err := safeJoin(destDir, hdr.Name)
@@ -248,22 +249,6 @@ func extractRar(archivePath, destDir string) error {
 		}
 		out.Close()
 	}
-}
-
-// OS-generated cruft that should never hit disk: "._name" resource forks,
-// ".DS_Store", and anything under "__MACOSX/".
-func isJunk(name string) bool {
-	name = filepath.ToSlash(name)
-	base := filepath.Base(name)
-	if base == ".DS_Store" || strings.HasPrefix(base, "._") {
-		return true
-	}
-	for _, part := range strings.Split(name, "/") {
-		if part == "__MACOSX" {
-			return true
-		}
-	}
-	return false
 }
 
 // Joins destDir with an archive-provided path, rejecting anything that escapes

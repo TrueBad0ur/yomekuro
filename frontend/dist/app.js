@@ -191,6 +191,11 @@ async function showBooks(seriesName) {
   const url = new URL('/api/books', location.origin);
   url.searchParams.set('limit', '200');
   url.searchParams.set('series', seriesName);
+  // Default sort is alphabetical by title, which breaks for Roman-numeral
+  // volume suffixes (狼と香辛料IX sorts before 狼と香辛料V as plain text,
+  // showing volume 9 in position 5) — series_index is the actual reading
+  // order regardless of title text.
+  url.searchParams.set('sort', 'series');
   if (searchQuery) url.searchParams.set('q', searchQuery);
 
   let data;

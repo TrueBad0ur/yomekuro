@@ -23,7 +23,6 @@ services:
     environment:
       YOMEKURO_DB: "postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}?sslmode=disable"
       YOMEKURO_DATA: /data
-      YOMEKURO_BACKUP_DIR: /backup
       YOMEKURO_ADDR: ":8080"
       YOMEKURO_ADMIN_USER: ${YOMEKURO_ADMIN_USER:-admin}
       YOMEKURO_ADMIN_PASSWORD: ${YOMEKURO_ADMIN_PASSWORD}
@@ -32,6 +31,5 @@ services:
     volumes:
       - ./library:/library
       - ./data/app:/data
-      - ./backup:/backup
     ports:
       - "8080:8080"

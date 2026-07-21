@@ -112,6 +112,74 @@ func TestRawScanNewerThanEPUB(t *testing.T) {
 	}
 }
 
+// Regression test for a gap found while manually fixing books on 2026-07-21:
+// findRawScanRoot/findRawScanVolumeDir (2.1-2.5) only covered the "-in" raw
+// scan side. A book's own OUTPUT folder and the .epub filenames inside it can
+// independently carry different Unicode normalization from each other (and
+// from the raw scan) for the same book — hit for real on
+// 解雇された暗黒兵士（30代）のスローなセカンドライフ, whose output folder was NFD
+// while its own .epub filenames were NFC. findOutputRoot/findEpubFile close
+// that gap the same way findRawScanRoot/findRawScanVolumeDir already do.
+func TestFindOutputRoot_NFCNFDMismatch(t *testing.T) {
+	base := t.TempDir()
+	nameNFD := norm.NFD.String("解雇された暗黒兵士（30代）のスローなセカンドライフ")
+	if err := os.Mkdir(filepath.Join(base, nameNFD), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	nameNFC := norm.NFC.String("解雇された暗黒兵士（30代）のスローなセカンドライフ")
+
+	dir, ok := findOutputRoot(base, nameNFC)
+	if !ok {
+		t.Fatalf("findOutputRoot: expected a match despite NFC/NFD mismatch, got none")
+	}
+	if filepath.Base(dir) != nameNFD {
+		t.Errorf("findOutputRoot: resolved to %q, want %q", filepath.Base(dir), nameNFD)
+	}
+}
+
+func TestFindOutputRoot_IgnoresRawScanFolder(t *testing.T) {
+	base := t.TempDir()
+	// Only the "-in" folder exists — must NOT be mistaken for the output folder.
+	if err := os.Mkdir(filepath.Join(base, "Frieren-in"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := findOutputRoot(base, "Frieren"); ok {
+		t.Errorf("findOutputRoot matched the raw-scan folder, want no match")
+	}
+}
+
+func TestFindEpubFile_NFCNFDMismatch(t *testing.T) {
+	outDir := t.TempDir()
+	// The folder's own name is irrelevant here — only the epub filename's
+	// normalization matters, which findEpubFile must tolerate independently.
+	volNFC := norm.NFC.String("解雇された暗黒兵士（30代）のスローなセカンドライフ v10")
+	fname := norm.NFD.String(volNFC) + ".epub"
+	if err := os.WriteFile(filepath.Join(outDir, fname), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	path, ok := findEpubFile(outDir, volNFC)
+	if !ok {
+		t.Fatalf("findEpubFile: expected a match despite NFC/NFD mismatch, got none")
+	}
+	if filepath.Base(path) != fname {
+		t.Errorf("findEpubFile: resolved to %q, want %q", filepath.Base(path), fname)
+	}
+}
+
+func TestFindEpubFile_ExactMatch(t *testing.T) {
+	outDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(outDir, "Frieren v01.epub"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := findEpubFile(outDir, "Frieren v01"); !ok {
+		t.Error("findEpubFile: exact match failed")
+	}
+	if _, ok := findEpubFile(outDir, "Frieren v99"); ok {
+		t.Error("findEpubFile: expected no match for a nonexistent volume")
+	}
+}
+
 func TestFindRawScanVolumeDir(t *testing.T) {
 	base := t.TempDir()
 	for _, d := range []string{"Ossan Bokensha v01", "Ossan Bokensha v02"} {

@@ -19,14 +19,13 @@ type Server struct {
 	scanner            *scanner.Scanner
 	watcher            *scanner.Watcher
 	dataDir            string
-	backupDir          string
 	zips               *zipCache
 	jobsPollIntervalMS int
 	sysStats           *sysstats.Collector
 	loginLimiter       *loginLimiter
 }
 
-func NewRouter(pool *pgxpool.Pool, sc *scanner.Scanner, w *scanner.Watcher, dataDir, backupDir string, zipCacheSize, jobsPollIntervalMS int) http.Handler {
+func NewRouter(pool *pgxpool.Pool, sc *scanner.Scanner, w *scanner.Watcher, dataDir string, zipCacheSize, jobsPollIntervalMS int) http.Handler {
 	// 15s samples, 4h retained — enough for the Settings status graph without
 	// an unbounded in-memory history; this is live telemetry, not persisted.
 	stats := sysstats.NewCollector(15*time.Second, 4*time.Hour)
@@ -37,7 +36,6 @@ func NewRouter(pool *pgxpool.Pool, sc *scanner.Scanner, w *scanner.Watcher, data
 		scanner:            sc,
 		watcher:            w,
 		dataDir:            dataDir,
-		backupDir:          backupDir,
 		zips:               newZipCache(zipCacheSize),
 		jobsPollIntervalMS: jobsPollIntervalMS,
 		sysStats:           stats,

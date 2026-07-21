@@ -45,6 +45,16 @@ func Convert(ctx context.Context, input, output, volume string, noCache bool, de
 		return 0, 0, fmt.Errorf("create output dir: %w", err)
 	}
 
+	// Strip OS junk (macOS "._name" AppleDouble forks, .DS_Store, Thumbs.db,
+	// __MACOSX/) before anything reads this tree. Archive uploads already skip
+	// these on extraction (internal/archive), but a raw scan can also land here
+	// via the manual-folder workflow or a plain file copy, which don't go
+	// through that code path — mokuro globs the directory itself and chokes on
+	// a "._0001.jpg" with the same ".jpg" extension as the real page.
+	if err := cleanJunkFiles(input); err != nil {
+		return 0, 0, fmt.Errorf("clean junk files: %w", err)
+	}
+
 	// Always from every candidate name, even when volume narrows the OCR run to
 	// one of them — else a single-volume reconvert looks like its own series.
 	names, err := candidateVolumeNames(input)
@@ -302,6 +312,23 @@ func isEmptyDir(dir string) (bool, error) {
 		return false, nil
 	}
 	return true, nil
+}
+
+// Removes OS-generated cruft (see shared.IsJunkName) from dir's whole tree
+// before mokuro or any volume-discovery logic sees it.
+func cleanJunkFiles(dir string) error {
+	return filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
+		if err != nil || path == dir || !shared.IsJunkName(path) {
+			return err
+		}
+		if d.IsDir() {
+			if err := os.RemoveAll(path); err != nil {
+				return err
+			}
+			return filepath.SkipDir
+		}
+		return os.Remove(path)
+	})
 }
 
 // Decodes .jxl pages to .png via djxl — mokuro only reads jpg/png/webp. PNG, not

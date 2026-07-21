@@ -67,49 +67,6 @@ func isEPUB(filename string) bool {
 	return strings.EqualFold(filepath.Ext(filename), ".epub")
 }
 
-// backupRawScan mirrors inDir's raw, pre-OCR content into <backupDir>/<libraryName>/<name>/,
-// replacing any prior backup under that name rather than mixing old and new.
-func backupRawScan(backupDir, libraryName, name, inDir string) error {
-	dest := filepath.Join(backupDir, libraryName, name)
-	if err := os.RemoveAll(dest); err != nil {
-		return fmt.Errorf("backup: clear old copy: %w", err)
-	}
-	if err := copyDir(inDir, dest); err != nil {
-		os.RemoveAll(dest)
-		return fmt.Errorf("backup: copy: %w", err)
-	}
-	return nil
-}
-
-// copyDir recursively copies src into dst, creating dst if needed.
-func copyDir(src, dst string) error {
-	return filepath.Walk(src, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			return err
-		}
-		rel, err := filepath.Rel(src, path)
-		if err != nil {
-			return err
-		}
-		target := filepath.Join(dst, rel)
-		if info.IsDir() {
-			return os.MkdirAll(target, 0755)
-		}
-		in, err := os.Open(path)
-		if err != nil {
-			return err
-		}
-		defer in.Close()
-		out, err := os.Create(target)
-		if err != nil {
-			return err
-		}
-		defer out.Close()
-		_, err = io.Copy(out, in)
-		return err
-	})
-}
-
 // extractEPUBImages pulls page images out of an EPUB's "/images/" entries into
 // destDir, renumbered page-001.<ext>, page-002.<ext>, ... in page order.
 func extractEPUBImages(epubPath, destDir string) error {
@@ -282,11 +239,12 @@ func (s *Server) uploadArchive(w http.ResponseWriter, r *http.Request) {
 			respondError(w, http.StatusBadRequest, "invalid book name")
 			return
 		}
-		outDir = filepath.Join(lib.Path, name)
-		if info, err := os.Stat(outDir); err != nil || !info.IsDir() {
+		resolved, ok := findOutputRoot(lib.Path, name)
+		if !ok {
 			respondError(w, http.StatusNotFound, "book not found in this library")
 			return
 		}
+		outDir = resolved
 	} else {
 		name = r.FormValue("name")
 		if name == "" {
@@ -298,12 +256,12 @@ func (s *Server) uploadArchive(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		outDir = filepath.Join(lib.Path, name)
-		if _, err := os.Stat(outDir); err == nil {
+		if _, ok := findOutputRoot(lib.Path, name); ok {
 			respondError(w, http.StatusConflict, "a folder with this name already exists in the library")
 			return
 		}
 		inDir = filepath.Join(lib.Path, name+"-in")
-		if _, err := os.Stat(inDir); err == nil {
+		if _, ok := findRawScanRoot(lib.Path, name); ok {
 			respondError(w, http.StatusConflict, "a manga with this name is already uploaded")
 			return
 		}
@@ -452,13 +410,6 @@ func (s *Server) uploadArchive(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Best-effort backup mirror — never blocks or fails the upload.
-	if s.backupDir != "" {
-		if err := backupRawScan(s.backupDir, lib.Name, name, inDir); err != nil {
-			slog.Warn("backup raw scan failed", "name", name, "err", err)
-		}
-	}
-
 	if _, err := db.CreateConversionJob(r.Context(), s.db, libID, name, inDir, outDir); err != nil {
 		respondInternal(w, "cannot queue job", err)
 		return
@@ -585,9 +536,6 @@ type reconvertVolumeDTO struct {
 	NeedsReconvert bool   `json:"needs_reconvert,omitempty"`
 }
 
-// rawScanNewerThanEPUB flags a hand-edited raw scan as stale even though OCR
-// never re-ran. Directory mtimes count too: renaming a file in place doesn't
-// touch its own mtime, but does touch its parent directory's.
 // findRawScanRoot resolves the "<name>-in" raw-scan folder for a book. A plain
 // byte-exact join can miss it: names synced in from macOS/HFS+ are Unicode
 // NFD-normalized, server-created folders are NFC — visually identical,
@@ -647,6 +595,54 @@ func findRawScanVolumeDir(inDir, volume string) (string, bool) {
 		}
 		if len(matches) == 1 {
 			return matches[0], true
+		}
+	}
+	return "", false
+}
+
+// findOutputRoot resolves a book's own output folder ("<name>", no "-in").
+// Same byte-exact-then-NFC-fallback approach as findRawScanRoot — a book's
+// output folder and its raw-scan folder can end up with different Unicode
+// normalization even for the same book (e.g. the output folder predates a
+// Mac-sourced raw-scan resync that brought in NFD-normalized names), so this
+// cannot simply reuse findRawScanRoot with a different suffix.
+func findOutputRoot(libPath, name string) (string, bool) {
+	exact := filepath.Join(libPath, name)
+	if info, err := os.Stat(exact); err == nil && info.IsDir() {
+		return exact, true
+	}
+	entries, err := os.ReadDir(libPath)
+	if err != nil {
+		return "", false
+	}
+	want := norm.NFC.String(name)
+	for _, e := range entries {
+		if e.IsDir() && !strings.HasSuffix(e.Name(), "-in") && norm.NFC.String(e.Name()) == want {
+			return filepath.Join(libPath, e.Name()), true
+		}
+	}
+	return "", false
+}
+
+// findEpubFile resolves a volume's ".epub" file inside outDir, tolerating the
+// same NFC/NFD mismatch findRawScanVolumeDir guards against — a book's output
+// folder can hold epub filenames in a different normalization than the
+// "volume" string a caller constructed from the raw-scan side (see
+// converter.go's reconvertVolumesBulk, which hit exactly this: NFD folder,
+// NFC-named epubs, for the same book).
+func findEpubFile(outDir, volume string) (string, bool) {
+	exact := filepath.Join(outDir, volume+".epub")
+	if _, err := os.Stat(exact); err == nil {
+		return exact, true
+	}
+	entries, err := os.ReadDir(outDir)
+	if err != nil {
+		return "", false
+	}
+	want := norm.NFC.String(volume + ".epub")
+	for _, e := range entries {
+		if !e.IsDir() && norm.NFC.String(e.Name()) == want {
+			return filepath.Join(outDir, e.Name()), true
 		}
 	}
 	return "", false
@@ -825,8 +821,8 @@ func (s *Server) reconvertSeries(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	outDir := filepath.Join(lib.Path, name)
-	if info, err := os.Stat(outDir); err != nil || !info.IsDir() {
+	outDir, ok := findOutputRoot(lib.Path, name)
+	if !ok {
 		respondError(w, http.StatusNotFound, "book not found in this library")
 		return
 	}
@@ -848,7 +844,7 @@ func (s *Server) reconvertSeries(w http.ResponseWriter, r *http.Request) {
 			respondError(w, http.StatusBadRequest, "invalid volume name")
 			return
 		}
-		if _, err := os.Stat(filepath.Join(outDir, volume+".epub")); err != nil {
+		if _, ok := findEpubFile(outDir, volume); !ok {
 			respondError(w, http.StatusNotFound, "volume not found in this book")
 			return
 		}
@@ -895,7 +891,7 @@ func (s *Server) reconvertVolumesBulk(w http.ResponseWriter, r *http.Request, li
 			respondError(w, http.StatusBadRequest, fmt.Sprintf("invalid volume name %q", raw))
 			return
 		}
-		if _, err := os.Stat(filepath.Join(outDir, volume+".epub")); err != nil {
+		if _, ok := findEpubFile(outDir, volume); !ok {
 			respondError(w, http.StatusNotFound, fmt.Sprintf("volume %q not found in this book", volume))
 			return
 		}
@@ -1012,7 +1008,16 @@ func (s *Server) extractVolumeImages(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	epubPath := filepath.Join(lib.Path, name, volume+".epub")
+	outDir, ok := findOutputRoot(lib.Path, name)
+	if !ok {
+		respondError(w, http.StatusNotFound, "book not found in this library")
+		return
+	}
+	epubPath, ok := findEpubFile(outDir, volume)
+	if !ok {
+		respondError(w, http.StatusNotFound, "volume not found")
+		return
+	}
 
 	// The original EPUB itself — no extraction needed, just serve the file.
 	if format == "epub" {
@@ -1161,8 +1166,13 @@ func (s *Server) deleteBook(w http.ResponseWriter, r *http.Request) {
 			respondError(w, http.StatusBadRequest, "invalid volume")
 			return
 		}
-		epubPath := filepath.Join(lib.Path, name, volume+".epub")
-		if _, err := os.Stat(epubPath); err != nil {
+		outDir, ok := findOutputRoot(lib.Path, name)
+		if !ok {
+			respondError(w, http.StatusNotFound, "book not found in this library")
+			return
+		}
+		epubPath, ok := findEpubFile(outDir, volume)
+		if !ok {
 			respondError(w, http.StatusNotFound, "volume not found")
 			return
 		}
@@ -1194,8 +1204,11 @@ func (s *Server) deleteBook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	outDir := filepath.Join(lib.Path, name)
-	inDir := filepath.Join(lib.Path, name+"-in")
+	outDir, ok := findOutputRoot(lib.Path, name)
+	if !ok {
+		respondError(w, http.StatusNotFound, "book not found in this library")
+		return
+	}
 
 	epubs, _ := filepath.Glob(filepath.Join(outDir, "*.epub"))
 	for _, ep := range epubs {
@@ -1208,7 +1221,9 @@ func (s *Server) deleteBook(w http.ResponseWriter, r *http.Request) {
 		respondInternal(w, "failed to delete book folder", err)
 		return
 	}
-	os.RemoveAll(inDir)
+	if inDir, ok := findRawScanRoot(lib.Path, name); ok {
+		os.RemoveAll(inDir)
+	}
 
 	w.WriteHeader(http.StatusNoContent)
 }
@@ -1246,15 +1261,19 @@ func (s *Server) renameBook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	pathOrDir := filepath.Join(lib.Path, name)
+	var pathOrDir string
 	if req.Kind == "html" {
 		pathOrDir = filepath.Join(lib.Path, name+".html")
 		if _, err := os.Stat(pathOrDir); err != nil {
 			pathOrDir = filepath.Join(lib.Path, name+".htm")
 		}
-	} else if info, err := os.Stat(pathOrDir); err != nil || !info.IsDir() {
-		respondError(w, http.StatusNotFound, "book not found in this library")
-		return
+	} else {
+		resolved, ok := findOutputRoot(lib.Path, name)
+		if !ok {
+			respondError(w, http.StatusNotFound, "book not found in this library")
+			return
+		}
+		pathOrDir = resolved
 	}
 
 	n, err := db.RenameSeriesUnderPath(r.Context(), s.db, libID, pathOrDir, displayName)
