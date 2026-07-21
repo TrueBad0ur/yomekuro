@@ -72,7 +72,7 @@ btnSpread.addEventListener('click', async () => {
   if (isMobileViewport()) return;
   spreadMode = !spreadMode;
   btnSpread.classList.toggle('active', spreadMode);
-  await loadChapter(spineIndex, false);
+  await loadChapter(spineIndex, false, 'none');
 });
 
 function renderTOC(entries, level) {
@@ -359,14 +359,44 @@ async function init() {
     btnTOC.disabled = true;
   }
 
-  await loadChapter(spineIndex, true);
+  await loadChapter(spineIndex, true, 'replace');
 }
+
+// ── Browser back/forward ─────────────────────────────────────────────────────
+// Each chapter/page turn gets its own history entry (spine index in the URL),
+// so pressing Back steps back one page at a time before leaving the reader —
+// matching how someone who paged through a book expects Back to behave,
+// instead of exiting straight to the library on the very first press.
+
+// historyMode: 'push' (default, a real navigation — prev/next/TOC/tap/swipe),
+// 'replace' (the chapter that's already on screen, e.g. initial load), or
+// 'none' (already reflected in history — popstate, or a same-page re-render
+// like toggling Spread that doesn't actually change spineIndex).
+function syncHistory(historyMode) {
+  if (historyMode === 'none') return;
+  const url = new URL(location.href);
+  url.searchParams.set('spine', spineIndex);
+  if (historyMode === 'replace') {
+    history.replaceState({ spine: spineIndex }, '', url);
+  } else {
+    history.pushState({ spine: spineIndex }, '', url);
+  }
+}
+
+window.addEventListener('popstate', (e) => {
+  const idx = e.state && typeof e.state.spine === 'number'
+    ? e.state.spine
+    : parseInt(new URLSearchParams(location.search).get('spine'), 10) || 0;
+  pendingFusedHalf = null;
+  loadChapter(idx, false, 'none');
+});
 
 // ── Load chapter ──────────────────────────────────────────────────────────────
 
-async function loadChapter(index, restoreScroll) {
+async function loadChapter(index, restoreScroll, historyMode) {
   if (!manifest || index < 0 || index >= manifest.spine.length) return;
   spineIndex = index;
+  syncHistory(historyMode || 'push');
 
   const item = manifest.spine[index];
   let text;

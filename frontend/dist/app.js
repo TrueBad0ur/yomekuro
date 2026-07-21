@@ -92,6 +92,46 @@ const tagChips      = document.getElementById('tag-chips');
 const tagChipsEmpty = document.getElementById('tag-chips-empty');
 const navAllTitles  = document.getElementById('nav-all-titles');
 
+// ── Browser back/forward ─────────────────────────────────────────────────────
+// Every view change (library/series/tag) gets its own history entry, so
+// pressing Back steps back through what was actually browsed (series → its
+// library → all titles) instead of always dropping to the home page. Search
+// input uses 'replace' instead of 'push' so refining a search doesn't leave a
+// back-stop per keystroke.
+
+function currentViewParams() {
+  const p = new URLSearchParams();
+  if (currentView === 'library' && currentLibrary) {
+    p.set('view', 'library');
+    p.set('lib', currentLibrary.id);
+    p.set('libname', currentLibrary.name);
+  } else if (currentView === 'series') {
+    p.set('view', 'series');
+    p.set('series', viewTitle.textContent);
+  } else if (currentView === 'tag') {
+    p.set('view', 'tag');
+    p.set('tag', viewTitle.textContent);
+  }
+  if (searchQuery) p.set('q', searchQuery);
+  return p;
+}
+
+// historyMode: 'push' (default — a real navigation), 'replace' (refining the
+// current view, e.g. search-as-you-type), or 'none' (already reflected in the
+// URL — restoring on load, or a popstate event).
+function syncAppHistory(historyMode) {
+  if (historyMode === 'none') return;
+  const params = currentViewParams();
+  const url = params.toString() ? `/?${params.toString()}` : '/';
+  if (historyMode === 'replace') {
+    history.replaceState({ appView: true }, '', url);
+  } else {
+    history.pushState({ appView: true }, '', url);
+  }
+}
+
+window.addEventListener('popstate', () => { restoreFromURL(); });
+
 // ── Views ─────────────────────────────────────────────────────────────────────
 
 function renderSeriesGrid(items, emptyText) {
@@ -127,13 +167,14 @@ function renderSeriesGrid(items, emptyText) {
   }
 }
 
-function showTitles() {
+function showTitles(historyMode) {
   currentView = 'titles';
   currentLibrary = null;
   breadcrumb.hidden = true;
   viewTitle.textContent = 'Library';
   setActiveNav(navAllTitles);
   searchInput.placeholder = 'Search titles…';
+  syncAppHistory(historyMode || 'push');
 
   const filtered = searchQuery
     ? allSeries.filter(s => s.name.toLowerCase().includes(searchQuery.toLowerCase()))
@@ -149,7 +190,7 @@ function filterLibrarySeries() {
   renderSeriesGrid(filtered, 'Empty.');
 }
 
-async function showLibrary(lib, headerEl) {
+async function showLibrary(lib, headerEl, historyMode) {
   currentView = 'library';
   currentLibrary = lib;
   breadcrumb.hidden = false;
@@ -158,6 +199,7 @@ async function showLibrary(lib, headerEl) {
   activeTag = '';
   renderTagChips();
   if (headerEl) setActiveNav(headerEl);
+  syncAppHistory(historyMode || 'push');
 
   grid.innerHTML = '<p style="padding:1.5rem;color:var(--text-dim)">Loading…</p>';
   emptyMsg.hidden = true;
@@ -176,11 +218,12 @@ async function showLibrary(lib, headerEl) {
   filterLibrarySeries();
 }
 
-async function showBooks(seriesName) {
+async function showBooks(seriesName, historyMode) {
   currentView = 'series';
   breadcrumb.hidden = false;
   viewTitle.textContent = seriesName;
   searchInput.placeholder = 'Search…';
+  syncAppHistory(historyMode || 'push');
 
   document.querySelectorAll('.nav-item.active, .library-group-header.active')
     .forEach(el => el.classList.remove('active'));
@@ -211,11 +254,12 @@ async function showBooks(seriesName) {
   renderBookGrid(data.items || []);
 }
 
-async function showTaggedBooks(tagName) {
+async function showTaggedBooks(tagName, historyMode) {
   currentView = 'tag';
   breadcrumb.hidden = false;
   viewTitle.textContent = tagName;
   searchInput.placeholder = 'Search…';
+  syncAppHistory(historyMode || 'push');
   document.querySelectorAll('.nav-item.active, .library-group-header.active')
     .forEach(el => el.classList.remove('active'));
 
@@ -471,21 +515,18 @@ async function openTagEditor(bookId, bookTitle, anchorEl) {
 
 // ── Series (all titles grid) ─────────────────────────────────────────────────
 
-async function loadSeries() {
-  let data;
+async function loadSeriesData() {
   try {
-    data = await fetch('/api/series?exclude_html=1').then(r => r.json());
+    const data = await fetch('/api/series?exclude_html=1').then(r => r.json());
+    allSeries = data.items || [];
   } catch {
     allSeries = [];
-    showTitles();
-    return;
   }
-
-  allSeries = data.items || [];
-  showTitles();
 }
 
 // ── Library tabs (top bar) ────────────────────────────────────────────────────
+
+let loadedLibraries = [];
 
 async function loadLibraries() {
   let libs;
@@ -496,6 +537,7 @@ async function loadLibraries() {
     return;
   }
 
+  loadedLibraries = libs;
   libraryGroups.innerHTML = '';
   if (libs.length === 0) {
     libraryGroups.innerHTML = '<span class="nav-loading">No libraries yet.</span>';
@@ -543,13 +585,14 @@ document.getElementById('logo-home').addEventListener('click', () => {
 
 function doSearch() {
   if (activeTag) {
-    showTaggedBooks(activeTag);
+    showTaggedBooks(activeTag, 'replace');
   } else if (currentView === 'library') {
     filterLibrarySeries();
+    syncAppHistory('replace');
   } else if (currentView === 'series') {
-    showBooks(viewTitle.textContent);
+    showBooks(viewTitle.textContent, 'replace');
   } else {
-    showTitles();
+    showTitles('replace');
   }
 }
 
@@ -593,13 +636,48 @@ function esc(s) {
 
 // ── Init ──────────────────────────────────────────────────────────────────────
 
-checkAuth().then(ok => {
+// Restores whichever view the current URL describes (a deep link, a reload, or
+// a Back/Forward step) instead of always landing on the home "All Titles"
+// grid. Needs loadedLibraries/allSeries already populated.
+async function restoreFromURL() {
+  const params = new URLSearchParams(location.search);
+  searchQuery = params.get('q') || '';
+  searchInput.value = searchQuery;
+  const view = params.get('view');
+
+  if (view === 'tag') {
+    const tag = params.get('tag');
+    if (tag) {
+      activeTag = tag;
+      renderTagChips();
+      await showTaggedBooks(tag, 'none');
+      return;
+    }
+  } else if (view === 'series') {
+    const series = params.get('series');
+    if (series) {
+      await showBooks(series, 'none');
+      return;
+    }
+  } else if (view === 'library') {
+    const lib = loadedLibraries.find(l => l.id === params.get('lib'));
+    if (lib) {
+      const header = [...libraryGroups.querySelectorAll('.library-group-header')]
+        .find(h => h.textContent === lib.name);
+      await showLibrary(lib, header, 'none');
+      return;
+    }
+  }
+  showTitles('none');
+}
+
+checkAuth().then(async ok => {
   if (!ok) return;
   if (!currentUser.is_admin) {
     const settingsLink = document.getElementById('settings-link');
     if (settingsLink) settingsLink.hidden = true;
   }
-  loadSeries();
-  loadLibraries();
   loadTags();
+  await Promise.all([loadLibraries(), loadSeriesData()]);
+  await restoreFromURL();
 });

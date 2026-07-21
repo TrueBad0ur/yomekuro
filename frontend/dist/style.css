@@ -98,18 +98,32 @@ body.page-library { min-height: 100vh; }
 .breadcrumb-sep { color: var(--text-dim); font-size: 0.88rem; }
 .view-title { font-size: 1rem; font-weight: 600; }
 .header-theme-switcher { margin-left: auto; flex-shrink: 0; }
+/* Dark/Light (.theme-opt), Cache, Settings, and Logout all sit in the same
+   header row and should read as one consistent set of pill buttons — sized
+   to match .theme-opt (0.35rem 0.9rem padding, 0.85rem font), not each other's
+   previously mismatched one-off values. */
 .cache-toggle-btn {
   flex-shrink: 0;
-  padding: 0.35rem 0.7rem;
+  padding: 0.35rem 0.9rem;
   font-size: 0.85rem;
   border-radius: 6px;
 }
-.header-settings-link {
+.footer-link.header-settings-link {
   flex-shrink: 0;
   font-size: 0.85rem;
-  padding: 0.3rem 0.5rem;
+  padding: 0.35rem 0.9rem;
 }
-.logout-btn.header-logout-btn { margin-left: 0.6rem; flex-shrink: 0; }
+.logout-btn.header-logout-btn {
+  margin-left: 0.6rem;
+  flex-shrink: 0;
+  padding: 0.35rem 0.9rem;
+  font-size: 0.85rem;
+}
+/* One flex item, not three separate ones, so wrapping (see the mobile media
+   query below) moves the whole group to a new line atomically instead of
+   splitting it mid-group depending on how much room the rest of the header
+   happens to have on a given view (breadcrumb hidden vs shown changes that). */
+.header-controls-group { display: flex; align-items: center; gap: 0.75rem; flex-shrink: 0; }
 .cover-placeholder { width: 100%; aspect-ratio: 2/3; background: var(--border); }
 
 /* Library tabs — left-aligned under the logo, above the book grid. "All Titles"
@@ -700,6 +714,15 @@ body.page-settings { max-width: 1600px; width: 95%; margin: 0 auto; padding: 0 1
 @media (max-width: 720px) {
   .settings-layout { flex-direction: column; gap: 1rem; }
   .settings-nav {
+    /* .settings-nav's base rule sets `flex: 0 0 170px` — a fixed WIDTH for
+       the desktop sidebar, since .settings-layout's main axis is row there.
+       .settings-layout switches to flex-direction:column on mobile, which
+       flips that same flex-basis to a fixed HEIGHT instead — 170px of nav
+       bar regardless of how little space two wrapped lines of links
+       actually need, with the leftover space distributed onto the link
+       lines (align-content's default "stretch"), rendering the first link
+       as a tall, mostly-empty box. flex:0 0 auto lets height follow content. */
+    flex: 0 0 auto;
     position: static;
     flex-direction: row;
     flex-wrap: wrap;
@@ -1188,6 +1211,34 @@ body.page-settings { max-width: 1600px; width: 95%; margin: 0 auto; padding: 0 1
 
 @media (max-width: 640px) {
   .books-grid { grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 0.9rem; padding: 1rem; }
+
+  /* .main-header is a single-row flex with several flex-shrink:0 controls
+     (theme switcher, cache toggle, settings link, logout) — on a phone-width
+     screen they don't fit on one line, and with no wrap the row overflows the
+     viewport instead of shrinking, dragging the whole page (grid included)
+     into horizontal scroll. Below, .logo's own width got squeezed toward
+     zero by that overflow, and since CJK text wraps character-by-character
+     with no spaces to break on, "よめくろ" rendered as a vertical column
+     instead of a line. Letting the header wrap fixes both: each control gets
+     its natural width on whichever line it lands on, and the logo never
+     gets squeezed below its own text width in the first place. */
+  html, body { overflow-x: hidden; }
+  .main-header {
+    flex-wrap: wrap;
+    row-gap: 0.5rem;
+    padding: 0.6rem 0.9rem;
+  }
+  .logo { flex-shrink: 0; white-space: nowrap; }
+  .header-theme-switcher { margin-left: 0; }
+  /* .header-controls-group is one flex item, so wherever it wraps to (line 1
+     next to the theme switcher, or its own line), margin-left:auto pushes the
+     whole group flush right on that line — instead of the three buttons
+     wrapping independently and landing at the left edge, which happened
+     differently on "All Titles" (breadcrumb hidden, more room on line 1) vs a
+     library/series view (breadcrumb shown, less room), since where the header
+     actually breaks shifted between them. */
+  .header-controls-group { margin-left: auto; gap: 0.5rem; }
+  .logout-btn.header-logout-btn { margin-left: 0; }
 }
 
 /* A two-page spread doesn't fit a phone screen; keep manga single-page only.
