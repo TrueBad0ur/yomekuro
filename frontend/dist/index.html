@@ -35,7 +35,8 @@
     </header>
 
     <div class="library-tabs">
-      <button class="nav-item active" id="nav-all-titles">All Titles</button>
+      <button class="nav-item active" id="nav-my-library">My Library</button>
+      <button class="nav-item" id="nav-all-titles">All Titles</button>
       <div class="library-groups" id="library-groups">
         <span class="nav-loading">Loading…</span>
       </div>
@@ -55,6 +56,26 @@
     </div>
 
     <main>
+      <section class="personal-dashboard" id="personal-dashboard" hidden>
+        <div class="personal-stats" id="personal-stats"></div>
+        <section class="personal-section" id="continue-section">
+          <div class="personal-section-header">
+            <h2>Continue Reading</h2>
+            <span id="continue-count"></span>
+          </div>
+          <div class="personal-grid" id="continue-grid"></div>
+        </section>
+        <section class="personal-section" id="completed-section">
+          <div class="personal-section-header">
+            <h2>Completed</h2>
+            <span id="completed-count"></span>
+          </div>
+          <div class="personal-grid" id="completed-grid"></div>
+        </section>
+        <p class="empty-msg" id="personal-empty" hidden>
+          Start reading a book and it will appear here.
+        </p>
+      </section>
       <div id="books-grid" class="books-grid"></div>
       <p id="empty-msg" class="empty-msg" hidden></p>
     </main>

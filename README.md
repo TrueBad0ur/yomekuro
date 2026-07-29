@@ -61,10 +61,12 @@ works standalone if you only want the converter without yomekuro.
 
 ### Library page
 
-The home page lists your series as cover-art tiles. A centered tab row above
-the grid switches between "All Titles" and each library (Books / Manga);
+The default **My Library** view is personal to the signed-in user. It groups
+series into **Continue Reading** and **Completed**, shows reading statistics,
+and opens an unfinished series directly at its active or next unread volume.
+The remaining tabs switch to "All Titles" and each library (Books / Manga);
 click a series to see its books, click a book to start reading. Search and
-genre/tag filters are in the header.
+genre/tag filters are available in those catalog views.
 
 The **Cache: On / Off** button controls browser caching for covers and reader
 pages. Keep it on for normal use; switch it off after reconverting a volume to

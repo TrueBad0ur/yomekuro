@@ -74,6 +74,7 @@ func NewRouter(pool *pgxpool.Pool, sc *scanner.Scanner, w *scanner.Watcher, data
 		r.Post("/api/auth/logout", s.logout)
 		r.Get("/api/auth/me", s.me)
 		r.Get("/api/config", s.getConfig)
+		r.Get("/api/me/library", s.personalLibrary)
 
 		r.Get("/api/libraries", s.listLibraries)
 

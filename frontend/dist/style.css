@@ -578,6 +578,111 @@ mark.reading-mark {
   text-align: right;
 }
 
+/* ── Personal library dashboard ───────────────────────────────────────────── */
+
+.personal-dashboard { padding: 1.5rem 1.75rem 3rem; }
+.personal-stats {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 190px));
+  gap: 0.75rem;
+  margin-bottom: 2rem;
+}
+.personal-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  padding: 0.9rem 1rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+.personal-stat strong { color: var(--accent); font-size: 1.35rem; }
+.personal-stat span { color: var(--text-dim); font-size: 0.78rem; }
+.personal-section { margin-bottom: 2rem; }
+.personal-section-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 0.8rem;
+}
+.personal-section-header h2 { font-size: 1.05rem; }
+.personal-section-header span { color: var(--text-dim); font-size: 0.78rem; }
+.personal-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(285px, 1fr));
+  gap: 0.75rem;
+}
+.personal-card {
+  display: flex;
+  min-width: 0;
+  height: 150px;
+  padding: 0;
+  overflow: hidden;
+  text-align: left;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text);
+}
+.personal-card:hover { border-color: var(--accent); color: var(--text); }
+.personal-card img {
+  width: 100px;
+  height: 150px;
+  flex: 0 0 100px;
+  object-fit: cover;
+  background: var(--border);
+}
+.personal-card-body {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  flex: 1;
+  padding: 0.8rem;
+}
+.personal-card-title {
+  display: -webkit-box;
+  overflow: hidden;
+  font-size: 0.92rem;
+  font-weight: 600;
+  line-height: 1.35;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+.personal-card-meta {
+  margin-top: 0.35rem;
+  color: var(--text-dim);
+  font-size: 0.75rem;
+}
+.personal-card-target {
+  overflow: hidden;
+  margin-top: auto;
+  color: var(--accent);
+  font-size: 0.78rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.personal-card.completed .personal-card-target { color: #6bcf8d; }
+.personal-progress {
+  height: 3px;
+  margin-top: 0.55rem;
+  overflow: hidden;
+  border-radius: 2px;
+  background: var(--border);
+}
+.personal-progress i { display: block; height: 100%; background: var(--accent); }
+.personal-loading { color: var(--text-dim); font-size: 0.88rem; }
+.personal-error { color: #e07070; }
+
+@media (max-width: 640px) {
+  .personal-dashboard { padding: 1rem; }
+  .personal-stats { grid-template-columns: repeat(3, 1fr); }
+  .personal-stat { padding: 0.65rem; }
+  .personal-stat strong { font-size: 1.05rem; }
+  .personal-stat span { font-size: 0.68rem; }
+  .personal-grid { grid-template-columns: 1fr; }
+}
+
 /* ── Login page ───────────────────────────────────────────────────────────── */
 
 body.page-login {

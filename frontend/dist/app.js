@@ -75,7 +75,7 @@ let allSeries   = [];
 let searchQuery = '';
 let activeTag   = '';
 let debounceTimer = null;
-let currentView = 'titles'; // 'titles' | 'series' | 'tag' | 'library'
+let currentView = 'personal'; // 'personal' | 'titles' | 'series' | 'tag' | 'library'
 let currentLibrary = null;
 let currentLibrarySeries = [];
 
@@ -90,7 +90,10 @@ const btnSearch     = document.getElementById('btn-search');
 const libraryGroups = document.getElementById('library-groups');
 const tagChips      = document.getElementById('tag-chips');
 const tagChipsEmpty = document.getElementById('tag-chips-empty');
+const navMyLibrary  = document.getElementById('nav-my-library');
 const navAllTitles  = document.getElementById('nav-all-titles');
+const filterBar     = document.querySelector('.filter-bar');
+const personalDashboard = document.getElementById('personal-dashboard');
 
 // ── Browser back/forward ─────────────────────────────────────────────────────
 // Every view change (library/series/tag) gets its own history entry, so
@@ -101,7 +104,9 @@ const navAllTitles  = document.getElementById('nav-all-titles');
 
 function currentViewParams() {
   const p = new URLSearchParams();
-  if (currentView === 'library' && currentLibrary) {
+  if (currentView === 'titles') {
+    p.set('view', 'titles');
+  } else if (currentView === 'library' && currentLibrary) {
     p.set('view', 'library');
     p.set('lib', currentLibrary.id);
     p.set('libname', currentLibrary.name);
@@ -133,6 +138,96 @@ function syncAppHistory(historyMode) {
 window.addEventListener('popstate', () => { restoreFromURL(); });
 
 // ── Views ─────────────────────────────────────────────────────────────────────
+
+function showStandardContent() {
+  personalDashboard.hidden = true;
+  filterBar.hidden = false;
+  grid.hidden = false;
+}
+
+async function showPersonalLibrary(historyMode) {
+  currentView = 'personal';
+  currentLibrary = null;
+  breadcrumb.hidden = true;
+  viewTitle.textContent = 'My Library';
+  setActiveNav(navMyLibrary);
+  filterBar.hidden = true;
+  grid.hidden = true;
+  emptyMsg.hidden = true;
+  personalDashboard.hidden = false;
+  syncAppHistory(historyMode || 'push');
+
+  const stats = document.getElementById('personal-stats');
+  const continueGrid = document.getElementById('continue-grid');
+  const completedGrid = document.getElementById('completed-grid');
+  const personalEmpty = document.getElementById('personal-empty');
+  stats.innerHTML = '<div class="personal-loading">Loading your library…</div>';
+  continueGrid.innerHTML = '';
+  completedGrid.innerHTML = '';
+  personalEmpty.hidden = true;
+
+  let items;
+  try {
+    items = (await fetch('/api/me/library').then(r => {
+      if (!r.ok) throw new Error('request failed');
+      return r.json();
+    })).items || [];
+  } catch {
+    stats.innerHTML = '<div class="personal-loading personal-error">Failed to load your library.</div>';
+    return;
+  }
+
+  const reading = items.filter(item => !item.completed);
+  const completed = items.filter(item => item.completed);
+  const readVolumes = items.reduce((sum, item) => sum + item.read_count, 0);
+  stats.innerHTML = `
+    <div class="personal-stat"><strong>${reading.length}</strong><span>Reading</span></div>
+    <div class="personal-stat"><strong>${completed.length}</strong><span>Completed series</span></div>
+    <div class="personal-stat"><strong>${readVolumes}</strong><span>Volumes read</span></div>`;
+
+  document.getElementById('continue-count').textContent =
+    `${reading.length} title${reading.length === 1 ? '' : 's'}`;
+  document.getElementById('completed-count').textContent =
+    `${completed.length} title${completed.length === 1 ? '' : 's'}`;
+  document.getElementById('continue-section').hidden = reading.length === 0;
+  document.getElementById('completed-section').hidden = completed.length === 0;
+  personalEmpty.hidden = items.length > 0;
+
+  for (const item of reading) {
+    const pct = Math.round(item.progress_pct * 100);
+    const action = item.target_was_started ? 'Continue' : 'Next';
+    const card = document.createElement('button');
+    card.className = 'personal-card';
+    card.innerHTML = `
+      <img src="${cacheBust(item.cover_url)}" alt="${esc(item.name)}"
+           onerror="this.style.display='none'">
+      <span class="personal-card-body">
+        <span class="personal-card-title">${esc(item.name)}</span>
+        <span class="personal-card-meta">${item.read_count} of ${item.book_count} volumes read · ${pct}%</span>
+        <span class="personal-card-target">${action}: ${esc(item.target_book_title)}</span>
+        <span class="personal-progress"><i style="width:${pct}%"></i></span>
+      </span>`;
+    card.addEventListener('click', () => {
+      location.href = `/reader?id=${encodeURIComponent(item.target_book_id)}`;
+    });
+    continueGrid.appendChild(card);
+  }
+
+  for (const item of completed) {
+    const card = document.createElement('button');
+    card.className = 'personal-card completed';
+    card.innerHTML = `
+      <img src="${cacheBust(item.cover_url)}" alt="${esc(item.name)}"
+           onerror="this.style.display='none'">
+      <span class="personal-card-body">
+        <span class="personal-card-title">${esc(item.name)}</span>
+        <span class="personal-card-meta">${item.book_count} volume${item.book_count === 1 ? '' : 's'}</span>
+        <span class="personal-card-target">✓ Fully read</span>
+      </span>`;
+    card.addEventListener('click', () => showBooks(item.name));
+    completedGrid.appendChild(card);
+  }
+}
 
 function renderSeriesGrid(items, emptyText) {
   grid.innerHTML = '';
@@ -168,6 +263,7 @@ function renderSeriesGrid(items, emptyText) {
 }
 
 function showTitles(historyMode) {
+  showStandardContent();
   currentView = 'titles';
   currentLibrary = null;
   breadcrumb.hidden = true;
@@ -191,6 +287,7 @@ function filterLibrarySeries() {
 }
 
 async function showLibrary(lib, headerEl, historyMode) {
+  showStandardContent();
   currentView = 'library';
   currentLibrary = lib;
   breadcrumb.hidden = false;
@@ -219,6 +316,7 @@ async function showLibrary(lib, headerEl, historyMode) {
 }
 
 async function showBooks(seriesName, historyMode) {
+  showStandardContent();
   currentView = 'series';
   breadcrumb.hidden = false;
   viewTitle.textContent = seriesName;
@@ -255,6 +353,7 @@ async function showBooks(seriesName, historyMode) {
 }
 
 async function showTaggedBooks(tagName, historyMode) {
+  showStandardContent();
   currentView = 'tag';
   breadcrumb.hidden = false;
   viewTitle.textContent = tagName;
@@ -560,7 +659,15 @@ document.getElementById('btn-back').addEventListener('click', () => {
   searchInput.value = '';
   activeTag = '';
   renderTagChips();
-  showTitles();
+  showPersonalLibrary();
+});
+
+navMyLibrary.addEventListener('click', () => {
+  searchQuery = '';
+  searchInput.value = '';
+  activeTag = '';
+  renderTagChips();
+  showPersonalLibrary();
 });
 
 navAllTitles.addEventListener('click', () => {
@@ -578,7 +685,7 @@ document.getElementById('logo-home').addEventListener('click', () => {
   searchInput.value = '';
   activeTag = '';
   renderTagChips();
-  showTitles();
+  showPersonalLibrary();
 });
 
 // ── Search ────────────────────────────────────────────────────────────────────
@@ -645,7 +752,10 @@ async function restoreFromURL() {
   searchInput.value = searchQuery;
   const view = params.get('view');
 
-  if (view === 'tag') {
+  if (view === 'titles') {
+    showTitles('none');
+    return;
+  } else if (view === 'tag') {
     const tag = params.get('tag');
     if (tag) {
       activeTag = tag;
@@ -668,7 +778,7 @@ async function restoreFromURL() {
       return;
     }
   }
-  showTitles('none');
+  await showPersonalLibrary('none');
 }
 
 checkAuth().then(async ok => {

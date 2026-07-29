@@ -8,6 +8,112 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
+type PersonalSeries struct {
+	Name             string
+	BookCount        int
+	ReadCount        int
+	Progress         float64
+	LastReadAt       time.Time
+	CoverBookID      [16]byte
+	TargetBookID     [16]byte
+	TargetBookTitle  string
+	TargetProgress   float64
+	TargetWasStarted bool
+	Completed        bool
+}
+
+// ListPersonalSeries returns only series the user has interacted with. A
+// series is complete when every currently present volume is marked read.
+// For an unfinished series TargetBookID points to the most recently active
+// volume, or the first unread volume when the previous one was completed.
+func ListPersonalSeries(ctx context.Context, pool *pgxpool.Pool, userID [16]byte) ([]PersonalSeries, error) {
+	rows, err := pool.Query(ctx, `
+		WITH book_progress AS (
+			SELECT
+				b.id, b.series_name, b.series_index, b.title,
+				COALESCE(rp.percentage, 0) AS percentage,
+				rp.updated_at AS read_updated_at
+			FROM books b
+			LEFT JOIN reading_progress rp
+				ON rp.book_id = b.id AND rp.user_id = $1
+			WHERE b.series_name IS NOT NULL
+			  AND b.series_name != ''
+			  AND b.format != 'html'
+		),
+		series_progress AS (
+			SELECT
+				series_name,
+				COUNT(*)::int AS book_count,
+				COUNT(*) FILTER (WHERE percentage >= 1)::int AS read_count,
+				AVG(LEAST(GREATEST(percentage, 0), 1)) AS progress,
+				MAX(read_updated_at) AS last_read_at,
+				BOOL_AND(percentage >= 1) AS completed
+			FROM book_progress
+			GROUP BY series_name
+			HAVING COUNT(*) FILTER (WHERE percentage > 0) > 0
+		)
+		SELECT
+			sp.series_name, sp.book_count, sp.read_count, sp.progress,
+			sp.last_read_at, sp.completed,
+			cover.id::text,
+			COALESCE(target.id::text, ''),
+			COALESCE(target.title, ''),
+			COALESCE(target.percentage, 0),
+			COALESCE(target.percentage > 0, false)
+		FROM series_progress sp
+		JOIN LATERAL (
+			SELECT id
+			FROM book_progress bp
+			WHERE bp.series_name = sp.series_name
+			ORDER BY bp.series_index NULLS LAST, bp.title
+			LIMIT 1
+		) cover ON true
+		LEFT JOIN LATERAL (
+			SELECT id, title, percentage
+			FROM book_progress bp
+			WHERE bp.series_name = sp.series_name
+			  AND bp.percentage < 1
+			ORDER BY
+				CASE WHEN bp.percentage > 0 THEN 0 ELSE 1 END,
+				CASE WHEN bp.percentage > 0 THEN bp.read_updated_at END DESC NULLS LAST,
+				bp.series_index NULLS LAST,
+				bp.title
+			LIMIT 1
+		) target ON NOT sp.completed
+		ORDER BY sp.completed, sp.last_read_at DESC, sp.series_name`,
+		userID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []PersonalSeries
+	for rows.Next() {
+		var item PersonalSeries
+		var coverID, targetID string
+		if err := rows.Scan(
+			&item.Name, &item.BookCount, &item.ReadCount, &item.Progress,
+			&item.LastReadAt, &item.Completed, &coverID, &targetID,
+			&item.TargetBookTitle, &item.TargetProgress, &item.TargetWasStarted,
+		); err != nil {
+			return nil, err
+		}
+		item.CoverBookID, err = ParseUUID(coverID)
+		if err != nil {
+			return nil, err
+		}
+		if targetID != "" {
+			item.TargetBookID, err = ParseUUID(targetID)
+			if err != nil {
+				return nil, err
+			}
+		}
+		out = append(out, item)
+	}
+	return out, rows.Err()
+}
+
 type Progress struct {
 	BookID        [16]byte
 	UserID        [16]byte
