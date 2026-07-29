@@ -80,12 +80,12 @@ unread** — handy when you finish a book somewhere other than its last page.
 Finished volumes show "Read" instead of a percentage; the bar tracks reading
 progress otherwise. Admins get an extra "Edit genres" entry in the same menu.
 
-![Library page](docs/screenshots/library-dark.png)
+![Personal library with Read Later and Continue Reading](docs/screenshots/library-personal-loaded-dark.png)
 
 Opening a manga series replaces the title grid with its volumes in reading
 order, including per-volume progress and quick actions.
 
-![Manga volumes](docs/screenshots/grand-blue-volumes.png)
+![Grand Blue volumes in the current library UI](docs/screenshots/grand-blue-volumes-current-dark.png)
 
 ### Reading
 
@@ -113,7 +113,7 @@ or color, or delete one. They are private to the signed-in user and stay put
 on furigana-heavy pages (`<ruby>`/`<rt>`) since only individual text nodes get
 wrapped, never whole elements.
 
-![Bookmarks](docs/screenshots/bookmarks.png)
+![Multiple colored bookmarks](docs/screenshots/bookmarks-multicolor-dark.png)
 
 ### Settings (admin only)
 
@@ -191,6 +191,8 @@ generated cover files are still referenced by a book rather than being stale
 leftovers from an old deletion or reconversion.
 The report separates errors from warnings and shows only library-relative
 paths. It never scans, repairs, changes, or deletes anything.
+
+![Successful library integrity check](docs/screenshots/library-integrity-dark.png)
 
 ### Server Status (admin only)
 
