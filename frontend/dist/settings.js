@@ -722,9 +722,9 @@ function renderBooksList() {
           `}
           ${s.has_raw_scan ? `
             <select class="detector-size-picker" aria-label="OCR detail level" title="Text-detector resolution — higher catches more, but is slower">
+              <option value="3584">3584 (~6.3GB GPU, unverified)</option>
               <option value="3072" selected>3072 (default, ~5.5GB GPU)</option>
               <option value="2048">2048 (faster, ~3GB GPU)</option>
-              <option value="3584">Maximum (3584, ~6.3GB GPU, unverified)</option>
             </select>
             <button class="reconvert-btn" data-name="${esc(s.name)}" data-volume="${esc(v.name)}" ${jobActive ? 'disabled title="A conversion job is already running for this book"' : 'title="Redoes OCR for this volume only — other volumes just rebuild fast from cache, no extra GPU time"'}>${jobActive ? 'Converting…' : 'Reconvert (full OCR)'}</button>
           ` : ''}
@@ -748,9 +748,9 @@ function renderBooksList() {
         ${analyzedLabel}
         ${s.has_raw_scan
           ? `<select class="detector-size-picker" aria-label="OCR detail level" title="Text-detector resolution — higher catches more, but is slower">
+              <option value="3584">3584 (~6.3GB GPU, unverified)</option>
               <option value="3072" selected>3072 (default, ~5.5GB GPU)</option>
               <option value="2048">2048 (faster, ~3GB GPU)</option>
-              <option value="3584">Maximum (3584, ~6.3GB GPU, unverified)</option>
             </select>
             <button class="reconvert-btn" data-name="${esc(s.name)}" ${jobActive ? 'disabled title="A conversion job is already running for this book"' : 'title="Redoes OCR for every volume from scratch — takes as long as the first conversion"'}>${jobActive ? 'Converting…' : 'Reconvert all (full OCR)'}</button>`
           : `<span class="reconvert-no-scan" title="Raw scan no longer on disk — reconvert needs a fresh upload">no raw scan</span>`}

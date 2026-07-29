@@ -66,12 +66,21 @@ the grid switches between "All Titles" and each library (Books / Manga);
 click a series to see its books, click a book to start reading. Search and
 genre/tag filters are in the header.
 
+The **Cache: On / Off** button controls browser caching for covers and reader
+pages. Keep it on for normal use; switch it off after reconverting a volume to
+force every image and page to be fetched fresh.
+
 Each book has a **⋯** menu (top-right of its cover) to **mark the volume read or
 unread** — handy when you finish a book somewhere other than its last page.
 Finished volumes show "Read" instead of a percentage; the bar tracks reading
 progress otherwise. Admins get an extra "Edit genres" entry in the same menu.
 
-![Library page](docs/screenshots/library.png)
+![Library page](docs/screenshots/library-dark.png)
+
+Opening a manga series replaces the title grid with its volumes in reading
+order, including per-volume progress and quick actions.
+
+![Manga volumes](docs/screenshots/grand-blue-volumes.png)
 
 ### Reading
 
@@ -88,7 +97,7 @@ page photographed as one fused two-page spread (rather than a photo per
 physical page) shows one half at a time by default; press **Spread** to see
 the whole original image instead.
 
-![Reader](docs/screenshots/reader.png)
+![Reader](docs/screenshots/grand-blue-reader.png)
 
 ### Bookmarks
 
@@ -104,7 +113,7 @@ Regular users only get the theme toggle and logout button in the header.
 Admins additionally get a Settings page for managing libraries, users, and
 uploading manga for OCR conversion.
 
-![Settings page](docs/screenshots/settings.png)
+![Settings page](docs/screenshots/settings-libraries-dark.png)
 
 ### Upload & Jobs (admin only)
 
@@ -131,7 +140,7 @@ if a backup dir is configured (`YOMEKURO_BACKUP_DIR`, mounted by default in both
 compose files) — a safety net independent of the conversion pipeline, since OCR
 can be redone from a raw scan but a lost raw scan is gone for good.
 
-![Upload/conversion log](docs/screenshots/conversion-log.png)
+![Upload and conversion jobs](docs/screenshots/upload-jobs-dark.png)
 
 ### Manage Books (admin only)
 
@@ -161,12 +170,16 @@ Settings → Manage Books lists every book already in a library, per volume:
   can also be deleted on its own, leaving the rest of the book (and its
   shared raw scan folder) intact.
 
+![Manage Books](docs/screenshots/manage-books-grand-blue.png)
+
 ### Server Status (admin only)
 
 Settings → Server Status shows live host CPU/RAM/GPU metrics (utilization,
 temperature, VRAM), sampled every 15s with the last 4 hours kept in memory
 (resets on restart — this is live telemetry, not stored history). Useful for
 watching GPU load/temperature during a long OCR batch.
+
+![Server Status](docs/screenshots/server-status-dark.png)
 
 ---
 

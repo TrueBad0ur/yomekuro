@@ -862,10 +862,10 @@ body.page-settings { max-width: 1600px; width: 95%; margin: 0 auto; padding: 0 1
 .reconvert-volume-header {
   display: flex;
   align-items: baseline;
-  justify-content: space-between;
   gap: 0.5rem;
 }
 .reconvert-volume-name {
+  flex: 1;
   font-size: 0.85rem;
   font-weight: 600;
   color: var(--text);
