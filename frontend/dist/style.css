@@ -725,6 +725,53 @@ mark.reading-mark.color-green { background: rgba(70, 205, 135, 0.42); }
 .personal-progress i { display: block; height: 100%; background: var(--accent); }
 .personal-loading { color: var(--text-dim); font-size: 0.88rem; }
 .personal-error { color: #e07070; }
+.personal-categories-section { padding-bottom: 0.25rem; border-bottom: 1px solid var(--border); }
+.category-create-btn { padding: 0.35rem 0.75rem; font-size: 0.78rem; }
+.personal-category { margin-bottom: 1.25rem; }
+.personal-category-header {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  margin-bottom: 0.65rem;
+}
+.personal-category-header h3 { font-size: 0.9rem; }
+.personal-category-header > span:not(.personal-category-actions) {
+  color: var(--text-dim);
+  font-size: 0.72rem;
+}
+.personal-category-actions { display: flex; gap: 0.35rem; margin-left: auto; }
+.personal-category-actions button { padding: 0.2rem 0.5rem; font-size: 0.68rem; }
+.personal-category-actions .danger { color: #e07070; }
+.category-empty {
+  padding: 0.8rem 1rem;
+  border: 1px dashed var(--border);
+  border-radius: 8px;
+  color: var(--text-dim);
+  font-size: 0.78rem;
+}
+.category-series-card { height: 125px; }
+.category-series-card img { width: 84px; height: 125px; flex-basis: 84px; }
+.series-menu-btn { z-index: 3; }
+
+.category-editor-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  max-height: 230px;
+  margin-bottom: 0.6rem;
+  overflow-y: auto;
+}
+.category-check {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  padding: 0.4rem 0.25rem;
+  color: var(--text);
+  font-size: 0.82rem;
+  cursor: pointer;
+}
+.category-check:hover { color: var(--accent); }
+.category-check input { accent-color: var(--accent); }
 
 @media (max-width: 640px) {
   .personal-dashboard { padding: 1rem; }
@@ -733,6 +780,8 @@ mark.reading-mark.color-green { background: rgba(70, 205, 135, 0.42); }
   .personal-stat strong { font-size: 1.05rem; }
   .personal-stat span { font-size: 0.68rem; }
   .personal-grid { grid-template-columns: 1fr; }
+  .personal-category-header { flex-wrap: wrap; }
+  .personal-category-actions { margin-left: 0; }
 }
 
 /* ── Login page ───────────────────────────────────────────────────────────── */
@@ -897,6 +946,58 @@ body.page-settings { max-width: 1600px; width: 95%; margin: 0 auto; padding: 0 1
   padding-bottom: 0.6rem;
   border-bottom: 1px solid var(--border);
 }
+
+/* ── Library integrity ────────────────────────────────────────────────────── */
+
+.integrity-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin: 1rem 0;
+}
+.integrity-actions span { color: var(--text-dim); font-size: 0.82rem; }
+.integrity-report { display: flex; flex-direction: column; gap: 0.75rem; }
+.integrity-placeholder { color: var(--text-dim); font-size: 0.85rem; }
+.integrity-failed { color: #e07070; font-size: 0.85rem; }
+.integrity-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  padding: 0.8rem 1rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+}
+.integrity-summary strong { font-size: 0.95rem; }
+.integrity-summary span { color: var(--text-dim); font-size: 0.78rem; }
+.integrity-healthy { border-color: rgba(76, 175, 125, 0.55); }
+.integrity-warnings { border-color: rgba(217, 164, 65, 0.65); }
+.integrity-errors { border-color: rgba(224, 112, 112, 0.65); }
+.integrity-issues { display: flex; flex-direction: column; gap: 0.4rem; }
+.integrity-clean { padding: 1rem; color: #4caf7d; font-size: 0.85rem; }
+.integrity-issue {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.65rem;
+  padding: 0.65rem 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--surface);
+}
+.integrity-severity {
+  min-width: 54px;
+  padding: 0.12rem 0.3rem;
+  border-radius: 4px;
+  text-align: center;
+  text-transform: uppercase;
+  font-size: 0.62rem;
+  font-weight: 700;
+}
+.integrity-issue-error .integrity-severity { color: #fff; background: #b94750; }
+.integrity-issue-warning .integrity-severity { color: #201708; background: #d9a441; }
+.integrity-issue-body { display: flex; min-width: 0; flex-direction: column; gap: 0.2rem; }
+.integrity-issue-body strong { font-size: 0.8rem; font-weight: 500; }
+.integrity-issue-body small { color: var(--text-dim); font-size: 0.7rem; overflow-wrap: anywhere; }
 
 @media (max-width: 720px) {
   .settings-layout { flex-direction: column; gap: 1rem; }

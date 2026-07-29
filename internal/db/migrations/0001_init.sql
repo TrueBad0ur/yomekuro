@@ -129,3 +129,21 @@ CREATE TABLE bookmarks (
 
 CREATE INDEX idx_bookmarks_user_book
     ON bookmarks (user_id, book_id, spine_index, elem_index, start_offset);
+
+CREATE TABLE user_categories (
+    id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id    UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    name       TEXT NOT NULL,
+    is_system  BOOLEAN NOT NULL DEFAULT false,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE UNIQUE INDEX user_categories_user_name_unique
+    ON user_categories (user_id, LOWER(name));
+
+CREATE TABLE user_category_series (
+    category_id UUID NOT NULL REFERENCES user_categories(id) ON DELETE CASCADE,
+    series_name TEXT NOT NULL,
+    added_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (category_id, series_name)
+);

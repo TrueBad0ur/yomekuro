@@ -37,7 +37,7 @@ function init() {
 
 // ── Settings nav (one category visible at a time) ────────────────────────────
 
-const SETTINGS_SECTIONS = ['libraries', 'upload', 'books', 'status', 'users-section'];
+const SETTINGS_SECTIONS = ['libraries', 'upload', 'books', 'integrity', 'status', 'users-section'];
 
 function showSettingsSection(id) {
   if (!SETTINGS_SECTIONS.includes(id)) id = 'libraries';
@@ -65,6 +65,59 @@ document.getElementById('btn-logout').addEventListener('click', async () => {
   await fetch('/api/auth/logout', { method: 'POST' });
   location.href = '/login';
 });
+
+// ── Library integrity ─────────────────────────────────────────────────────────
+
+document.getElementById('btn-integrity-check').addEventListener('click', async () => {
+  const button = document.getElementById('btn-integrity-check');
+  const running = document.getElementById('integrity-running');
+  const root = document.getElementById('integrity-report');
+  button.disabled = true;
+  running.hidden = false;
+  root.innerHTML = '<p class="integrity-placeholder">Inspecting indexed books and library paths…</p>';
+  try {
+    const res = await fetch('/api/library-integrity/check', { method: 'POST' });
+    if (!res.ok) throw new Error('request failed');
+    renderIntegrityReport(await res.json());
+  } catch {
+    root.innerHTML = '<p class="integrity-failed">Integrity check failed. See the server log for details.</p>';
+  } finally {
+    button.disabled = false;
+    running.hidden = true;
+  }
+});
+
+function renderIntegrityReport(report) {
+  const root = document.getElementById('integrity-report');
+  const statusText = report.status === 'healthy'
+    ? 'Healthy'
+    : report.status === 'errors' ? 'Errors found' : 'Warnings found';
+  root.innerHTML = `
+    <div class="integrity-summary integrity-${esc(report.status)}">
+      <strong>${statusText}</strong>
+      <span>${report.books} books · ${report.files_checked} files checked ·
+        ${report.errors} errors · ${report.warnings} warnings ·
+        ${(report.duration_ms / 1000).toFixed(1)}s</span>
+    </div>
+    <div class="integrity-issues"></div>`;
+  const issues = root.querySelector('.integrity-issues');
+  if (!report.issues || report.issues.length === 0) {
+    issues.innerHTML = '<p class="integrity-clean">No integrity problems found.</p>';
+    return;
+  }
+  for (const issue of report.issues) {
+    const row = document.createElement('div');
+    row.className = `integrity-issue integrity-issue-${issue.severity}`;
+    const where = [issue.library, issue.book, issue.path].filter(Boolean).join(' · ');
+    row.innerHTML = `
+      <span class="integrity-severity">${esc(issue.severity)}</span>
+      <span class="integrity-issue-body">
+        <strong>${esc(issue.message)}</strong>
+        ${where ? `<small>${esc(where)}</small>` : ''}
+      </span>`;
+    issues.appendChild(row);
+  }
+}
 
 // ── Libraries ─────────────────────────────────────────────────────────────────
 

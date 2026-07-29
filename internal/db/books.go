@@ -104,6 +104,23 @@ type PagedBooks struct {
 	Limit int
 }
 
+func ListAllBooks(ctx context.Context, pool *pgxpool.Pool) ([]Book, error) {
+	rows, err := pool.Query(ctx, `SELECT`+selectBookCols+` FROM books ORDER BY path`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var books []Book
+	for rows.Next() {
+		b, err := scanBook(rows)
+		if err != nil {
+			return nil, err
+		}
+		books = append(books, b)
+	}
+	return books, rows.Err()
+}
+
 func ListBooks(ctx context.Context, pool *pgxpool.Pool, f BookFilter) (PagedBooks, error) {
 	var conds []string
 	var args []any

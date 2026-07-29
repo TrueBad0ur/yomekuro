@@ -75,6 +75,11 @@ func NewRouter(pool *pgxpool.Pool, sc *scanner.Scanner, w *scanner.Watcher, data
 		r.Get("/api/auth/me", s.me)
 		r.Get("/api/config", s.getConfig)
 		r.Get("/api/me/library", s.personalLibrary)
+		r.Get("/api/me/categories", s.listUserCategories)
+		r.Post("/api/me/categories", s.createUserCategory)
+		r.Patch("/api/me/categories/{id}", s.renameUserCategory)
+		r.Delete("/api/me/categories/{id}", s.deleteUserCategory)
+		r.Put("/api/me/categories/{id}/series", s.setSeriesCategory)
 
 		r.Get("/api/libraries", s.listLibraries)
 
@@ -122,6 +127,7 @@ func NewRouter(pool *pgxpool.Pool, sc *scanner.Scanner, w *scanner.Watcher, data
 			r.Put("/api/books/{id}/tags", s.setBookTags)
 
 			r.Get("/api/system-status", s.systemStatus)
+			r.Post("/api/library-integrity/check", s.checkLibraryIntegrity)
 
 			r.Get("/api/users", s.listUsers)
 			r.Post("/api/users", s.createUser)

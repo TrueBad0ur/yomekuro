@@ -25,6 +25,7 @@
       <a href="#libraries" class="settings-nav-link active">Libraries</a>
       <a href="#upload" class="settings-nav-link">Upload &amp; Jobs</a>
       <a href="#books" class="settings-nav-link">Manage Books</a>
+      <a href="#integrity" class="settings-nav-link">Library Integrity</a>
       <a href="#status" class="settings-nav-link">Server Status</a>
       <a href="#users-section" class="settings-nav-link">Users</a>
     </nav>
@@ -166,6 +167,23 @@
             <span><i class="status-swatch" style="background:#6b8fd9"></i> GPU °C</span>
           </div>
           <canvas id="status-temp-graph" width="900" height="220"></canvas>
+        </div>
+      </section>
+
+      <section class="settings-section" id="integrity">
+        <h2 class="settings-section-title">Library Integrity</h2>
+        <p class="upload-hint">
+          Read-only verification of indexed books and library directories. It checks
+          file availability, EPUB/HTML structure, covers, paths, indexed file sizes,
+          and supported files that exist on disk but are missing from the database.
+          Nothing is changed or deleted.
+        </p>
+        <div class="integrity-actions">
+          <button id="btn-integrity-check">Run integrity check</button>
+          <span id="integrity-running" hidden>Checking the library…</span>
+        </div>
+        <div id="integrity-report" class="integrity-report">
+          <p class="integrity-placeholder">No check has been run yet.</p>
         </div>
       </section>
 

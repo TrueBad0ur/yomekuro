@@ -78,6 +78,7 @@ let debounceTimer = null;
 let currentView = 'personal'; // 'personal' | 'titles' | 'series' | 'tag' | 'library'
 let currentLibrary = null;
 let currentLibrarySeries = [];
+let personalCategories = [];
 
 // ── DOM refs ──────────────────────────────────────────────────────────────────
 
@@ -168,10 +169,15 @@ async function showPersonalLibrary(historyMode) {
 
   let items;
   try {
-    items = (await fetch('/api/me/library').then(r => {
-      if (!r.ok) throw new Error('request failed');
-      return r.json();
-    })).items || [];
+    const [libraryData, categoryData] = await Promise.all([
+      fetch('/api/me/library').then(r => {
+        if (!r.ok) throw new Error('request failed');
+        return r.json();
+      }),
+      loadPersonalCategories(),
+    ]);
+    items = libraryData.items || [];
+    personalCategories = categoryData;
   } catch {
     stats.innerHTML = '<div class="personal-loading personal-error">Failed to load your library.</div>';
     return;
@@ -191,7 +197,9 @@ async function showPersonalLibrary(historyMode) {
     `${completed.length} title${completed.length === 1 ? '' : 's'}`;
   document.getElementById('continue-section').hidden = reading.length === 0;
   document.getElementById('completed-section').hidden = completed.length === 0;
-  personalEmpty.hidden = items.length > 0;
+  personalEmpty.hidden = items.length > 0 ||
+    personalCategories.some(category => (category.items || []).length > 0);
+  renderPersonalCategories();
 
   for (const item of reading) {
     const pct = Math.round(item.progress_pct * 100);
@@ -252,11 +260,16 @@ function renderSeriesGrid(items, emptyText) {
           <div class="book-title">${esc(s.name)}</div>
           <div class="book-author">${s.book_count} volume${s.book_count !== 1 ? 's' : ''}</div>
         </div>
-      </div>`;
+      </div>
+      <button class="book-tag-btn series-menu-btn" title="Categories">⋯</button>`;
     card.querySelector('.series-link').addEventListener('click', () => {
       activeTag = '';
       renderTagChips();
       showBooks(s.name);
+    });
+    card.querySelector('.series-menu-btn').addEventListener('click', e => {
+      e.stopPropagation();
+      openCategoryEditor(s.name, e.currentTarget);
     });
     grid.appendChild(card);
   }
@@ -499,6 +512,9 @@ function openBookMenu(book, anchorEl, onChanged) {
 
   popup.innerHTML = `
     <button class="book-menu-item" data-act="read">${isRead ? 'Mark as unread' : 'Mark as read'}</button>
+    ${book.series_name
+      ? '<button class="book-menu-item" data-act="categories">Categories</button>'
+      : ''}
     ${currentUser && currentUser.is_admin
       ? '<button class="book-menu-item" data-act="genres">Edit genres</button>'
       : ''}`;
@@ -516,6 +532,14 @@ function openBookMenu(book, anchorEl, onChanged) {
     onChanged();
   });
 
+  const categoriesBtn = popup.querySelector('[data-act="categories"]');
+  if (categoriesBtn) {
+    categoriesBtn.addEventListener('click', () => {
+      closeBookMenu();
+      openCategoryEditor(book.series_name, anchorEl);
+    });
+  }
+
   const genresBtn = popup.querySelector('[data-act="genres"]');
   if (genresBtn) {
     genresBtn.addEventListener('click', () => {
@@ -527,6 +551,191 @@ function openBookMenu(book, anchorEl, onChanged) {
   document.body.appendChild(popup);
   placePopup(popup, anchorEl);
 }
+
+// ── Personal categories ──────────────────────────────────────────────────────
+
+let categoryEditorPopup = null;
+
+async function loadPersonalCategories() {
+  const res = await fetch('/api/me/categories');
+  if (!res.ok) throw new Error('could not load categories');
+  return (await res.json()).items || [];
+}
+
+async function refreshPersonalCategories() {
+  personalCategories = await loadPersonalCategories();
+  if (currentView === 'personal') renderPersonalCategories();
+}
+
+function closeCategoryEditor() {
+  if (categoryEditorPopup) {
+    categoryEditorPopup.remove();
+    categoryEditorPopup = null;
+  }
+}
+
+document.addEventListener('click', e => {
+  if (categoryEditorPopup && !categoryEditorPopup.contains(e.target)) closeCategoryEditor();
+});
+
+async function createCategory(name) {
+  const res = await fetch('/api/me/categories', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name }),
+  });
+  if (!res.ok) return null;
+  const category = await res.json();
+  personalCategories.push(category);
+  return category;
+}
+
+async function setCategorySeries(categoryId, seriesName, included) {
+  const res = await fetch(`/api/me/categories/${categoryId}/series`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ series_name: seriesName, included }),
+  });
+  if (res.ok) await refreshPersonalCategories();
+  return res.ok;
+}
+
+async function openCategoryEditor(seriesName, anchorEl) {
+  closeCategoryEditor();
+  closeBookMenu();
+  try {
+    personalCategories = await loadPersonalCategories();
+  } catch {
+    return;
+  }
+
+  const popup = document.createElement('div');
+  popup.className = 'tag-editor-popup category-editor-popup';
+  popup.addEventListener('click', e => e.stopPropagation());
+  categoryEditorPopup = popup;
+
+  function render() {
+    popup.innerHTML = `
+      <div class="tag-editor-title">Categories · ${esc(seriesName)}</div>
+      <div class="category-editor-list">
+        ${personalCategories.map(category => {
+          const checked = (category.items || []).some(item => item.name === seriesName);
+          return `<label class="category-check">
+            <input type="checkbox" data-category="${category.id}" ${checked ? 'checked' : ''}>
+            <span>${esc(category.name)}</span>
+          </label>`;
+        }).join('')}
+      </div>
+      <div class="tag-editor-add">
+        <input class="tag-editor-input" maxlength="60" placeholder="New category…">
+        <button class="tag-editor-save">Create</button>
+      </div>`;
+
+    popup.querySelectorAll('[data-category]').forEach(input => {
+      input.addEventListener('change', async () => {
+        input.disabled = true;
+        const ok = await setCategorySeries(input.dataset.category, seriesName, input.checked);
+        if (!ok) input.checked = !input.checked;
+        input.disabled = false;
+      });
+    });
+
+    const input = popup.querySelector('.tag-editor-input');
+    const submit = async () => {
+      const name = input.value.trim();
+      if (!name) return;
+      const category = await createCategory(name);
+      if (!category) return;
+      await setCategorySeries(category.id, seriesName, true);
+      personalCategories = await loadPersonalCategories();
+      render();
+    };
+    popup.querySelector('.tag-editor-save').addEventListener('click', submit);
+    input.addEventListener('keydown', e => {
+      if (e.key === 'Enter') submit();
+    });
+  }
+
+  render();
+  document.body.appendChild(popup);
+  placePopup(popup, anchorEl);
+}
+
+function categorySeriesCard(item) {
+  const card = document.createElement('button');
+  card.className = 'personal-card category-series-card';
+  card.innerHTML = `
+    <img src="${cacheBust(item.cover_url)}" alt="${esc(item.name)}"
+         onerror="this.style.display='none'">
+    <span class="personal-card-body">
+      <span class="personal-card-title">${esc(item.name)}</span>
+      <span class="personal-card-meta">${item.book_count} volume${item.book_count === 1 ? '' : 's'}</span>
+      <span class="personal-card-target">Open title</span>
+    </span>`;
+  card.addEventListener('click', () => showBooks(item.name));
+  return card;
+}
+
+function renderPersonalCategories() {
+  const root = document.getElementById('personal-categories');
+  root.replaceChildren();
+  for (const category of personalCategories) {
+    const section = document.createElement('section');
+    section.className = 'personal-category';
+    const header = document.createElement('div');
+    header.className = 'personal-category-header';
+    const title = document.createElement('h3');
+    title.textContent = category.name;
+    const count = document.createElement('span');
+    count.textContent = `${(category.items || []).length} title${(category.items || []).length === 1 ? '' : 's'}`;
+    header.append(title, count);
+    if (!category.is_system) {
+      const actions = document.createElement('span');
+      actions.className = 'personal-category-actions';
+      const rename = document.createElement('button');
+      rename.textContent = 'Rename';
+      const remove = document.createElement('button');
+      remove.textContent = 'Delete';
+      remove.className = 'danger';
+      rename.addEventListener('click', async () => {
+        const name = prompt('Category name', category.name);
+        if (!name || name.trim() === category.name) return;
+        const res = await fetch(`/api/me/categories/${category.id}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name: name.trim() }),
+        });
+        if (res.ok) await refreshPersonalCategories();
+      });
+      remove.addEventListener('click', async () => {
+        if (!confirm(`Delete category “${category.name}”?`)) return;
+        const res = await fetch(`/api/me/categories/${category.id}`, { method: 'DELETE' });
+        if (res.ok) await refreshPersonalCategories();
+      });
+      actions.append(rename, remove);
+      header.appendChild(actions);
+    }
+    section.appendChild(header);
+    const categoryGrid = document.createElement('div');
+    categoryGrid.className = 'personal-grid';
+    for (const item of category.items || []) categoryGrid.appendChild(categorySeriesCard(item));
+    if (!(category.items || []).length) {
+      const empty = document.createElement('p');
+      empty.className = 'category-empty';
+      empty.textContent = 'Use the ⋯ menu on a title to add it here.';
+      section.appendChild(empty);
+    } else {
+      section.appendChild(categoryGrid);
+    }
+    root.appendChild(section);
+  }
+}
+
+document.getElementById('category-create').addEventListener('click', async () => {
+  const name = prompt('New category name');
+  if (!name) return;
+  if (await createCategory(name.trim())) await refreshPersonalCategories();
+});
 
 // ── Tag editor popup ──────────────────────────────────────────────────────────
 

@@ -64,6 +64,9 @@ works standalone if you only want the converter without yomekuro.
 The default **My Library** view is personal to the signed-in user. It groups
 series into **Continue Reading** and **Completed**, shows reading statistics,
 and opens an unfinished series directly at its active or next unread volume.
+It also includes a personal **Read Later** category and any custom categories
+you create. Use the **⋯** menu on a title or one of its volumes to add or remove
+the whole series; custom categories can be renamed or deleted from My Library.
 The remaining tabs switch to "All Titles" and each library (Books / Manga);
 click a series to see its books, click a book to start reading. Search and
 genre/tag filters are available in those catalog views.
@@ -176,6 +179,18 @@ Settings → Manage Books lists every book already in a library, per volume:
   shared raw scan folder) intact.
 
 ![Manage Books](docs/screenshots/manage-books-grand-blue.png)
+
+### Library Integrity (admin only)
+
+Settings → Library Integrity runs an explicit, read-only check across every
+configured library. It verifies that indexed files are present and readable,
+EPUB package metadata and spine entries can be opened, HTML files and generated
+covers are accessible, stored file sizes still match, book paths stay inside
+their configured library, supported files on disk are actually indexed, and
+generated cover files are still referenced by a book rather than being stale
+leftovers from an old deletion or reconversion.
+The report separates errors from warnings and shows only library-relative
+paths. It never scans, repairs, changes, or deletes anything.
 
 ### Server Status (admin only)
 
