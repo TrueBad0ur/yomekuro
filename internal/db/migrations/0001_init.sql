@@ -108,3 +108,24 @@ CREATE TABLE reading_progress (
     bookmark_end   INT,
     PRIMARY KEY (book_id, user_id)
 );
+
+CREATE TABLE bookmarks (
+    id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    book_id       UUID NOT NULL REFERENCES books(id) ON DELETE CASCADE,
+    user_id       UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    spine_index   INT NOT NULL,
+    elem_index    INT NOT NULL,
+    start_offset  INT NOT NULL,
+    end_offset    INT NOT NULL,
+    selected_text TEXT NOT NULL DEFAULT '',
+    note          TEXT NOT NULL DEFAULT '',
+    color         TEXT NOT NULL DEFAULT 'yellow',
+    created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CHECK (spine_index >= 0 AND elem_index >= 0),
+    CHECK (start_offset >= 0 AND end_offset > start_offset),
+    CHECK (color IN ('yellow', 'pink', 'blue', 'green'))
+);
+
+CREATE INDEX idx_bookmarks_user_book
+    ON bookmarks (user_id, book_id, spine_index, elem_index, start_offset);

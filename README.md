@@ -103,9 +103,12 @@ the whole original image instead.
 
 ### Bookmarks
 
-Select text while reading to highlight it as a bookmark; selections are
-saved per-book and stay put on furigana-heavy pages (`<ruby>`/`<rt>`) since
-only individual text nodes get wrapped, never whole elements.
+Select text while reading to create a bookmark with one of four highlight
+colors and an optional note. A book can have any number of bookmarks; use the
+**Bookmarks** panel to review them, jump back to the marked page, edit the note
+or color, or delete one. They are private to the signed-in user and stay put
+on furigana-heavy pages (`<ruby>`/`<rt>`) since only individual text nodes get
+wrapped, never whole elements.
 
 ![Bookmarks](docs/screenshots/bookmarks.png)
 
@@ -461,6 +464,7 @@ generation) works in practice. Don't override across RDNA generations.
 - Keyboard: `←` / `→` — prev/next page; `↑` / `↓` — scroll within zoomed page; `Ctrl +` / `Ctrl -` / `Ctrl 0` — zoom in/out/reset
 - Touch: swipe or tap the left/right edge to turn manga pages; long-press selects text for a bookmark, a bare tap never does
 - Spread view: toggle **Spread** button in the nav bar
+- Bookmarks: multiple colored highlights per book, optional notes, and a panel for jumping to, editing, or deleting them
 
 ### Text lookup (Yomitan / 10ten)
 

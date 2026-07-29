@@ -24,10 +24,8 @@ let isVertical = false;
 let isFixedLayout = false;
 let saveTimer = null;
 let restoredProgression = 0;
-let bookmarkSpine = null;
-let bookmarkElem  = null;
-let bookmarkStart = null;
-let bookmarkEnd   = null;
+let bookmarks = [];
+let pendingBookmarkJump = null;
 let fixedDoc = null;
 let fixedChapterBase = '';
 let fixedDoc2 = null;
@@ -53,13 +51,26 @@ const tocPanel   = document.getElementById('toc-panel');
 const tocOverlay = document.getElementById('toc-overlay');
 const tocClose   = document.getElementById('toc-close');
 const tocList    = document.getElementById('toc-list');
+const btnBookmarks = document.getElementById('btn-bookmarks');
+const bookmarkCount = document.getElementById('bookmark-count');
+const bookmarksPanel = document.getElementById('bookmarks-panel');
+const bookmarksClose = document.getElementById('bookmarks-close');
+const bookmarksList = document.getElementById('bookmarks-list');
 
-function openTOC()  { tocPanel.classList.add('open');  tocOverlay.classList.add('visible'); }
-function closeTOC() { tocPanel.classList.remove('open'); tocOverlay.classList.remove('visible'); }
+function closePanels() {
+  tocPanel.classList.remove('open');
+  bookmarksPanel.classList.remove('open');
+  tocOverlay.classList.remove('visible');
+}
+function openTOC()  { closePanels(); tocPanel.classList.add('open'); tocOverlay.classList.add('visible'); }
+function openBookmarks() { closePanels(); bookmarksPanel.classList.add('open'); tocOverlay.classList.add('visible'); }
+function closeTOC() { closePanels(); }
 
 btnTOC.addEventListener('click', openTOC);
+btnBookmarks.addEventListener('click', openBookmarks);
 tocClose.addEventListener('click', closeTOC);
-tocOverlay.addEventListener('click', closeTOC);
+bookmarksClose.addEventListener('click', closePanels);
+tocOverlay.addEventListener('click', closePanels);
 
 // A two-page spread only makes sense on a device with a mouse/trackpad-sized
 // screen — never on a phone, however spreadMode is set. Detected by pointer
@@ -100,7 +111,7 @@ function renderTOC(entries, level) {
 // ── Bookmark ──────────────────────────────────────────────────────────────────
 
 function bookmarkElements() {
-  return Array.from(content.querySelectorAll('p, li, h1, h2, h3, h4, h5, h6, blockquote'));
+  return Array.from(content.querySelectorAll('p, li, h1, h2, h3, h4, h5, h6, blockquote, [data-reader-text]'));
 }
 
 // Character offset of targetNode:targetOffset within container's text nodes
@@ -126,7 +137,7 @@ function domPositionFromOffset(container, offset) {
   return last ? { node: last, offset: last.textContent.length } : null;
 }
 
-function applyBookmarkMark() {
+function applyBookmarkMarks() {
   // Unwrap any existing .reading-mark elements
   content.querySelectorAll('.reading-mark').forEach(mark => {
     const parent = mark.parentNode;
@@ -134,30 +145,33 @@ function applyBookmarkMark() {
     parent.removeChild(mark);
   });
 
-  if (bookmarkSpine !== spineIndex || bookmarkElem === null || bookmarkStart === null) return;
-
   const elems = bookmarkElements();
-  const target = elems[bookmarkElem];
-  if (!target) return;
+  for (const bookmark of bookmarks.filter(item => item.spine_index === spineIndex)) {
+    const target = elems[bookmark.elem_index];
+    if (!target) continue;
+    try {
+      const s = domPositionFromOffset(target, bookmark.start_offset);
+      const e = domPositionFromOffset(target, bookmark.end_offset);
+      if (!s || !e) continue;
+      const range = document.createRange();
+      range.setStart(s.node, s.offset);
+      range.setEnd(e.node, e.offset);
+      markTextNodesInRange(range, target, bookmark);
+    } catch {
+      // Ignore bookmarks whose source text has since changed.
+    }
+  }
 
-  try {
-    const s = domPositionFromOffset(target, bookmarkStart);
-    const e = domPositionFromOffset(target, bookmarkEnd);
-    if (!s || !e) return;
-
-    const range = document.createRange();
-    range.setStart(s.node, s.offset);
-    range.setEnd(e.node, e.offset);
-
-    markTextNodesInRange(range, target);
-  } catch {
-    // ignore if DOM has changed in unexpected ways
+  if (pendingBookmarkJump) {
+    const target = content.querySelector(`[data-bookmark-id="${CSS.escape(pendingBookmarkJump)}"]`);
+    if (target) target.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'center' });
+    pendingBookmarkJump = null;
   }
 }
 
 // Wraps each text-node fragment inside `range` in its own <mark>. Never moves
 // element nodes: that would rip <rt> out of <ruby> and break the furigana.
-function markTextNodesInRange(range, root) {
+function markTextNodesInRange(range, root, bookmark) {
   const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
     acceptNode: node => range.intersectsNode(node) ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_REJECT,
   });
@@ -175,43 +189,143 @@ function markTextNodesInRange(range, root) {
     subRange.setEnd(textNode, end);
 
     const mark = document.createElement('mark');
-    mark.className = 'reading-mark';
+    mark.className = `reading-mark color-${bookmark.color}`;
+    mark.dataset.bookmarkId = bookmark.id;
     subRange.surroundContents(mark); // range spans a single text node: always safe
   }
 }
 
-// Popup for removing bookmark when clicking on highlighted text
 let bmPopup = null;
 
 function hideBmPopup() {
   if (bmPopup) { bmPopup.remove(); bmPopup = null; }
 }
 
-function showBmPopup(x, y) {
+function colorPicker(selected) {
+  const row = document.createElement('div');
+  row.className = 'bm-colors';
+  for (const color of ['yellow', 'pink', 'blue', 'green']) {
+    const input = document.createElement('input');
+    input.type = 'radio';
+    input.name = 'bookmark-color';
+    input.value = color;
+    input.checked = color === selected;
+    input.setAttribute('aria-label', color);
+    row.appendChild(input);
+  }
+  return row;
+}
+
+function positionBmPopup(x, y) {
+  requestAnimationFrame(() => {
+    const margin = 10;
+    bmPopup.style.left = `${Math.max(margin, Math.min(x, innerWidth - bmPopup.offsetWidth - margin))}px`;
+    bmPopup.style.top = `${Math.max(margin, Math.min(y + 10, innerHeight - bmPopup.offsetHeight - margin))}px`;
+  });
+}
+
+function showBmPopup(x, y, draft, existing) {
+  hideBmPopup();
   bmPopup = document.createElement('div');
   bmPopup.className = 'bm-popup';
-  const btn = document.createElement('button');
-  btn.textContent = 'Remove bookmark';
-  bmPopup.appendChild(btn);
-  // keep popup inside viewport
-  const px = Math.min(x, window.innerWidth - 180);
-  const py = y + 10;
-  bmPopup.style.left = px + 'px';
-  bmPopup.style.top  = py + 'px';
+  const heading = document.createElement('strong');
+  heading.textContent = existing ? 'Edit bookmark' : 'New bookmark';
+  const colors = colorPicker(existing ? existing.color : 'yellow');
+  const note = document.createElement('textarea');
+  note.placeholder = 'Optional note';
+  note.maxLength = 5000;
+  note.value = existing ? existing.note : '';
+  const actions = document.createElement('div');
+  actions.className = 'bm-actions';
+  const save = document.createElement('button');
+  save.className = 'primary';
+  save.textContent = existing ? 'Save' : 'Add';
+  const cancel = document.createElement('button');
+  cancel.textContent = 'Cancel';
+  actions.append(save, cancel);
+  if (existing) {
+    const remove = document.createElement('button');
+    remove.className = 'danger';
+    remove.textContent = 'Delete';
+    actions.appendChild(remove);
+    remove.addEventListener('click', async () => {
+      const res = await fetch(`/api/bookmarks/${existing.id}`, { method: 'DELETE' });
+      if (!res.ok) return;
+      bookmarks = bookmarks.filter(item => item.id !== existing.id);
+      applyBookmarkMarks();
+      renderBookmarks();
+      hideBmPopup();
+    });
+  }
+  bmPopup.append(heading, colors, note, actions);
   document.body.appendChild(bmPopup);
+  positionBmPopup(x, y);
 
-  btn.addEventListener('click', (e) => {
+  save.addEventListener('click', async (e) => {
     e.stopPropagation();
-    bookmarkSpine = null;
-    bookmarkElem  = null;
-    bookmarkStart = null;
-    bookmarkEnd   = null;
-    applyBookmarkMark();
-    saveProgress();
+    save.disabled = true;
+    const color = colors.querySelector('input:checked').value;
+    const res = await fetch(existing ? `/api/bookmarks/${existing.id}` : `/api/books/${bookId}/bookmarks`, {
+      method: existing ? 'PATCH' : 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(existing ? { note: note.value, color } : { ...draft, note: note.value, color }),
+    });
+    if (!res.ok) { save.disabled = false; return; }
+    const item = await res.json();
+    if (existing) bookmarks = bookmarks.map(old => old.id === item.id ? item : old);
+    else bookmarks.push(item);
+    applyBookmarkMarks();
+    renderBookmarks();
     hideBmPopup();
   });
-
+  cancel.addEventListener('click', hideBmPopup);
   bmPopup.addEventListener('click', e => e.stopPropagation());
+  note.focus();
+}
+
+function renderBookmarks() {
+  bookmarks.sort((a, b) =>
+    a.spine_index - b.spine_index ||
+    a.elem_index - b.elem_index ||
+    a.start_offset - b.start_offset
+  );
+  bookmarkCount.textContent = bookmarks.length ? `(${bookmarks.length})` : '';
+  bookmarksList.replaceChildren();
+  if (!bookmarks.length) {
+    const empty = document.createElement('p');
+    empty.className = 'bookmarks-empty';
+    empty.textContent = 'Select text in the reader to add a bookmark.';
+    bookmarksList.appendChild(empty);
+    return;
+  }
+  for (const bookmark of bookmarks) {
+    const button = document.createElement('button');
+    button.className = 'bookmark-item';
+    const meta = document.createElement('span');
+    meta.className = 'bookmark-item-meta';
+    const dot = document.createElement('i');
+    dot.className = `bookmark-color-dot color-${bookmark.color}`;
+    const page = document.createElement('span');
+    page.textContent = `Page ${bookmark.spine_index + 1}`;
+    meta.append(dot, page);
+    const quote = document.createElement('span');
+    quote.className = 'bookmark-item-quote';
+    quote.textContent = bookmark.selected_text || 'Bookmark';
+    button.append(meta, quote);
+    if (bookmark.note) {
+      const note = document.createElement('span');
+      note.className = 'bookmark-item-note';
+      note.textContent = bookmark.note;
+      button.appendChild(note);
+    }
+    button.addEventListener('click', async () => {
+      saveProgress();
+      pendingBookmarkJump = bookmark.id;
+      closePanels();
+      await loadChapter(bookmark.spine_index, false);
+    });
+    bookmarksList.appendChild(button);
+  }
 }
 
 // Text selection → bookmark (desktop: any mouse selection; touch: gated below)
@@ -233,25 +347,31 @@ function onSelectionEnd() {
   if (elemIndex < 0) return;
 
   const start = getTextOffset(elemNode, range.startContainer, range.startOffset);
-  const end   = getTextOffset(elemNode, range.endContainer,   range.endOffset);
-  if (start === end) return;
+  if (!elemNode.contains(range.endContainer)) return;
+  const end = getTextOffset(elemNode, range.endContainer, range.endOffset);
+  if (start >= end) return;
+  const selectedText = range.toString().trim();
+  if (!selectedText) return;
 
+  const rect = range.getBoundingClientRect();
+  const draft = {
+    spine_index: spineIndex, elem_index: elemIndex,
+    start_offset: start, end_offset: end, selected_text: selectedText,
+  };
   sel.removeAllRanges();
-  bookmarkSpine = spineIndex;
-  bookmarkElem  = elemIndex;
-  bookmarkStart = start;
-  bookmarkEnd   = end;
-  applyBookmarkMark();
-  saveProgress();
+  // mouseup is followed by a click on the selected text. Open after that click
+  // has bubbled, otherwise the document-level outside-click handler immediately
+  // removes the popup that was just created.
+  setTimeout(() => showBmPopup(rect.left, rect.bottom, draft, null), 0);
 }
 
-// Click on highlighted text → show Remove popup
 content.addEventListener('click', (e) => {
   const mark = e.target.closest('.reading-mark');
   hideBmPopup();
   if (mark) {
     e.stopPropagation();
-    showBmPopup(e.clientX, e.clientY);
+    const bookmark = bookmarks.find(item => item.id === mark.dataset.bookmarkId);
+    if (bookmark) showBmPopup(e.clientX, e.clientY, null, bookmark);
   }
 });
 
@@ -270,7 +390,7 @@ let touchStartX = 0, touchStartY = 0, touchStartTime = 0, touchMoved = false;
 function isInteractiveTarget(target) {
   return !!target.closest(
     'button, a, input, textarea, .reader-nav, .reader-bottom-nav, .toc-panel, ' +
-    '.toc-overlay, .book-menu-popup, .bm-popup, .tag-editor-popup, mark.reading-mark'
+    '.toc-overlay, .bookmarks-panel, .book-menu-popup, .bm-popup, .tag-editor-popup, mark.reading-mark'
   );
 }
 
@@ -331,9 +451,10 @@ document.addEventListener('touchend', (e) => {
 
 async function init() {
   let progress;
-  [manifest, progress] = await Promise.all([
+  [manifest, progress, bookmarks] = await Promise.all([
     fetch(`/api/books/${bookId}/manifest`).then(r => r.json()),
     fetch(`/api/books/${bookId}/progress`).then(r => r.json()),
+    fetch(`/api/books/${bookId}/bookmarks`).then(r => r.json()),
   ]);
 
   document.title = manifest.title || 'yomekuro';
@@ -347,10 +468,7 @@ async function init() {
 
   spineIndex = progress.spine_index || 0;
   restoredProgression = progress.progression || 0;
-  bookmarkSpine = progress.bookmark_spine ?? null;
-  bookmarkElem  = progress.bookmark_elem  ?? null;
-  bookmarkStart = progress.bookmark_start ?? null;
-  bookmarkEnd   = progress.bookmark_end   ?? null;
+  renderBookmarks();
 
   if (manifest.toc && manifest.toc.length > 0) {
     renderTOC(manifest.toc, 0);
@@ -471,7 +589,7 @@ async function loadChapter(index, restoreScroll, historyMode) {
     } else {
       scrollToStart();
     }
-    applyBookmarkMark();
+    applyBookmarkMarks();
   }));
 }
 
@@ -587,6 +705,7 @@ function renderCurrentFixed() {
   } else {
     renderFixedPage(fixedDoc, fixedChapterBase);
   }
+  requestAnimationFrame(applyBookmarkMarks);
 }
 
 // halfIndex null renders the page in full; 0/1 clips to just that half (left/
@@ -628,6 +747,7 @@ function buildPageWrapper(bodyDiv, chapterBase, pw, ph, totalScale, left, halfIn
       const overlay = document.createElement('div');
       overlay.style.cssText = child.getAttribute('style') || '';
       overlay.textContent = child.textContent || '';
+      overlay.dataset.readerText = '';
       inner.appendChild(overlay);
     }
   }
@@ -775,10 +895,6 @@ function saveProgress() {
       spine_index:    spineIndex,
       progression:    Math.max(0, Math.min(1, progression)),
       percentage:     Math.max(0, Math.min(1, percentage)),
-      bookmark_spine: bookmarkSpine,
-      bookmark_elem:  bookmarkElem,
-      bookmark_start: bookmarkStart,
-      bookmark_end:   bookmarkEnd,
     }),
   }).catch(() => {});
 }

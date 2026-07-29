@@ -94,6 +94,10 @@ func NewRouter(pool *pgxpool.Pool, sc *scanner.Scanner, w *scanner.Watcher, data
 		r.Get("/api/books/{id}/progress", s.getProgress)
 		r.Put("/api/books/{id}/progress", s.putProgress)
 		r.Put("/api/books/{id}/read", s.setReadState)
+		r.Get("/api/books/{id}/bookmarks", s.listBookmarks)
+		r.Post("/api/books/{id}/bookmarks", s.createBookmark)
+		r.Patch("/api/bookmarks/{id}", s.updateBookmark)
+		r.Delete("/api/bookmarks/{id}", s.deleteBookmark)
 
 		// Admin-only: settings-page features. Regular users get read-only access to
 		// everything above (browse, read, track progress).
