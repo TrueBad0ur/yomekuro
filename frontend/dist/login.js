@@ -11,6 +11,22 @@ const loginForm   = document.getElementById('login-form');
 const regForm     = document.getElementById('register-form');
 const loginErr    = document.getElementById('login-error');
 const regErr      = document.getElementById('reg-error');
+const googleBtn   = document.getElementById('google-login-btn');
+const loginDivider = document.getElementById('login-divider');
+
+fetch('/api/auth/providers').then(r => r.json()).then(providers => {
+  if (providers.google) {
+    googleBtn.hidden = false;
+    loginDivider.hidden = false;
+  }
+}).catch(() => {});
+
+const oauthError = new URLSearchParams(location.search).get('error');
+if (oauthError) {
+  loginErr.textContent = oauthError;
+  loginErr.hidden = false;
+  history.replaceState({}, '', '/login');
+}
 
 tabLogin.addEventListener('click', () => {
   tabLogin.classList.add('active');

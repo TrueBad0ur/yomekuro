@@ -96,7 +96,11 @@ func main() {
 		}
 	}()
 
-	router := api.NewRouter(pool, sc, watcher, cfg.Data, cfg.ZipCacheSize, cfg.JobsPollIntervalMS)
+	router := api.NewRouter(pool, sc, watcher, cfg.Data, cfg.ZipCacheSize, cfg.JobsPollIntervalMS, api.GoogleOAuthConfig{
+		ClientID:     cfg.GoogleClientID,
+		ClientSecret: cfg.GoogleClientSecret,
+		RedirectURL:  cfg.GoogleRedirectURL,
+	})
 
 	// WriteTimeout is deliberately unset: it would cut off large downloads to slow
 	// clients. ReadHeaderTimeout still guards against Slowloris.

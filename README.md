@@ -181,6 +181,42 @@ watching GPU load/temperature during a long OCR batch.
 
 ![Server Status](docs/screenshots/server-status-dark.png)
 
+### Google sign-in (optional)
+
+Local username/password login remains available. To add Google sign-in, create
+an OAuth 2.0 **Web application** client in Google Auth Platform. The login page
+shows the Google button only when the integration is fully configured.
+
+![Google sign-in](docs/screenshots/google-login-dark.png)
+
+In Google Auth Platform, configure Branding and Audience first (External, with
+test users while the app is in Testing), then create a Web application client.
+Set the Authorized JavaScript origin to the public HTTPS origin and the
+Authorized redirect URI to:
+
+```text
+https://your-yomekuro.example/api/auth/google/callback
+```
+
+Then set all three variables below. Keep the client secret in `.env`; never
+commit it:
+
+```dotenv
+YOMEKURO_GOOGLE_CLIENT_ID=123456789-example.apps.googleusercontent.com
+YOMEKURO_GOOGLE_CLIENT_SECRET=...
+YOMEKURO_GOOGLE_REDIRECT_URL=https://your-yomekuro.example/api/auth/google/callback
+```
+
+Only the OpenID `openid`, `email`, and `profile` scopes are requested. A user's
+stable Google account ID is stored locally; a verified email is used as their
+initial username. New Google users are regular users by default. An existing
+admin can promote them from Settings → Users. Local password accounts and
+Google accounts use the same sessions, permissions, progress, and admin UI.
+
+The redirect URI must match Google Cloud exactly. Production Google sign-in
+requires an HTTPS hostname; a private plain-HTTP address is not a valid
+production callback.
+
 ---
 
 ## .env

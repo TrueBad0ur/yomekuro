@@ -190,6 +190,43 @@ Settings → Server Status показывает живые метрики хос
 
 ![Состояние сервера](docs/screenshots/server-status-dark.png)
 
+### Вход через Google (необязательно)
+
+Обычный вход по логину и паролю остаётся доступен. Для входа через Google
+создайте OAuth 2.0 client типа **Web application** в Google Auth Platform.
+Кнопка Google появляется на странице входа только при полной конфигурации.
+
+![Вход через Google](docs/screenshots/google-login-dark.png)
+
+Сначала настройте в Google Auth Platform разделы Branding и Audience
+(External; пока приложение в Testing, добавьте нужные аккаунты как test
+users), затем создайте Web application client. Укажите публичный HTTPS-адрес
+как Authorized JavaScript origin, а в Authorized redirect URI добавьте:
+
+```text
+https://your-yomekuro.example/api/auth/google/callback
+```
+
+Затем задайте все три переменные ниже. Client secret храните только в `.env`
+и никогда не коммитьте:
+
+```dotenv
+YOMEKURO_GOOGLE_CLIENT_ID=123456789-example.apps.googleusercontent.com
+YOMEKURO_GOOGLE_CLIENT_SECRET=...
+YOMEKURO_GOOGLE_REDIRECT_URL=https://your-yomekuro.example/api/auth/google/callback
+```
+
+Запрашиваются только OpenID-права `openid`, `email` и `profile`. В локальной БД
+хранится стабильный ID Google-аккаунта, а подтверждённый email становится
+исходным именем пользователя. Новый Google-пользователь по умолчанию не
+администратор; существующий администратор может выдать роль через Settings →
+Users. Локальные и Google-аккаунты используют одинаковые сессии, права,
+прогресс чтения и административный интерфейс.
+
+Redirect URI должен в точности совпадать с Google Cloud. Для production-входа
+Google нужен HTTPS-домен; приватный HTTP-адрес не подходит как production
+callback.
+
 ---
 
 ## .env

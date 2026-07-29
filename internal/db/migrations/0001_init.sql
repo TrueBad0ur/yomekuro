@@ -54,9 +54,14 @@ CREATE TABLE users (
     id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     username      TEXT NOT NULL UNIQUE,
     password_hash TEXT NOT NULL,
+    google_sub    TEXT,
     is_admin      BOOLEAN NOT NULL DEFAULT false,
     created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+CREATE UNIQUE INDEX users_google_sub_unique
+    ON users (google_sub)
+    WHERE google_sub IS NOT NULL;
 
 CREATE TABLE sessions (
     token      TEXT PRIMARY KEY,

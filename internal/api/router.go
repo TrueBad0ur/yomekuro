@@ -23,9 +23,20 @@ type Server struct {
 	jobsPollIntervalMS int
 	sysStats           *sysstats.Collector
 	loginLimiter       *loginLimiter
+	googleOAuth        GoogleOAuthConfig
 }
 
-func NewRouter(pool *pgxpool.Pool, sc *scanner.Scanner, w *scanner.Watcher, dataDir string, zipCacheSize, jobsPollIntervalMS int) http.Handler {
+type GoogleOAuthConfig struct {
+	ClientID     string
+	ClientSecret string
+	RedirectURL  string
+}
+
+func (c GoogleOAuthConfig) Enabled() bool {
+	return c.ClientID != "" && c.ClientSecret != "" && c.RedirectURL != ""
+}
+
+func NewRouter(pool *pgxpool.Pool, sc *scanner.Scanner, w *scanner.Watcher, dataDir string, zipCacheSize, jobsPollIntervalMS int, googleOAuth GoogleOAuthConfig) http.Handler {
 	// 15s samples, 4h retained — enough for the Settings status graph without
 	// an unbounded in-memory history; this is live telemetry, not persisted.
 	stats := sysstats.NewCollector(15*time.Second, 4*time.Hour)
@@ -40,6 +51,7 @@ func NewRouter(pool *pgxpool.Pool, sc *scanner.Scanner, w *scanner.Watcher, data
 		jobsPollIntervalMS: jobsPollIntervalMS,
 		sysStats:           stats,
 		loginLimiter:       newLoginLimiter(),
+		googleOAuth:        googleOAuth,
 	}
 
 	r := chi.NewRouter()
@@ -51,6 +63,9 @@ func NewRouter(pool *pgxpool.Pool, sc *scanner.Scanner, w *scanner.Watcher, data
 	// Public auth endpoints
 	r.Post("/api/auth/login", s.login)
 	r.Post("/api/auth/register", s.register)
+	r.Get("/api/auth/providers", s.authProviders)
+	r.Get("/api/auth/google", s.googleLogin)
+	r.Get("/api/auth/google/callback", s.googleCallback)
 
 	// Protected API endpoints
 	r.Group(func(r chi.Router) {

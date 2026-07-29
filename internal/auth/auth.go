@@ -4,7 +4,9 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -61,6 +63,80 @@ func CreateUser(ctx context.Context, pool *pgxpool.Pool, username, password stri
 		username, hash, isAdmin,
 	).Scan(&u.ID, &u.Username, &u.IsAdmin)
 	return u, err
+}
+
+// GetOrCreateGoogleUser resolves a Google OpenID Connect subject to a local
+// user. A verified email is used as the initial display/login name, but never
+// to link an existing account: local usernames are not verified email
+// addresses, so treating a matching string as proof of ownership could attach
+// Google to the wrong (possibly admin) account.
+func GetOrCreateGoogleUser(ctx context.Context, pool *pgxpool.Pool, subject, email string) (User, error) {
+	if subject == "" || email == "" {
+		return User{}, fmt.Errorf("google subject and email are required")
+	}
+
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		return User{}, err
+	}
+	defer tx.Rollback(ctx)
+
+	// Serialize first-login requests for the same Google identity. The unique
+	// index is the final guard; this lock keeps the normal race path simple.
+	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtext($1))`, "google:"+subject); err != nil {
+		return User{}, err
+	}
+
+	var u User
+	err = tx.QueryRow(ctx,
+		`SELECT id, username, is_admin FROM users WHERE google_sub = $1`, subject,
+	).Scan(&u.ID, &u.Username, &u.IsAdmin)
+	if err == nil {
+		return u, tx.Commit(ctx)
+	}
+	if err != pgx.ErrNoRows {
+		return User{}, err
+	}
+
+	username := email
+	for suffix := 0; ; suffix++ {
+		var exists bool
+		if err := tx.QueryRow(ctx,
+			`SELECT EXISTS(SELECT 1 FROM users WHERE username = $1)`, username,
+		).Scan(&exists); err != nil {
+			return User{}, err
+		}
+		if !exists {
+			break
+		}
+		if suffix == 0 {
+			username = email + " (Google)"
+		} else {
+			username = fmt.Sprintf("%s (Google %d)", email, suffix+1)
+		}
+	}
+
+	// Google-only accounts still receive an unguessable password hash so the
+	// existing NOT NULL schema and password-login timing behavior stay intact.
+	// An admin may later set a real password through Users if desired.
+	randomPassword, err := newToken()
+	if err != nil {
+		return User{}, err
+	}
+	hash, err := HashPassword(randomPassword)
+	if err != nil {
+		return User{}, err
+	}
+	err = tx.QueryRow(ctx,
+		`INSERT INTO users (username, password_hash, google_sub, is_admin)
+		 VALUES ($1, $2, $3, false)
+		 RETURNING id, username, is_admin`,
+		strings.TrimSpace(username), hash, subject,
+	).Scan(&u.ID, &u.Username, &u.IsAdmin)
+	if err != nil {
+		return User{}, err
+	}
+	return u, tx.Commit(ctx)
 }
 
 func GetUserByUsername(ctx context.Context, pool *pgxpool.Pool, username string) (User, string, error) {

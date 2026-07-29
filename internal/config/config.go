@@ -14,6 +14,10 @@ type Config struct {
 	AdminUser     string
 	AdminPassword string
 
+	GoogleClientID     string
+	GoogleClientSecret string
+	GoogleRedirectURL  string
+
 	ScanOnStart bool
 
 	// How often the Settings page re-fetches the job list. Served to the frontend
@@ -32,6 +36,9 @@ func Load() Config {
 	flag.StringVar(&c.Addr, "addr", env("YOMEKURO_ADDR", ":8080"), "Listen address")
 	flag.StringVar(&c.AdminUser, "admin-user", env("YOMEKURO_ADMIN_USER", "admin"), "Admin username (created on first run)")
 	flag.StringVar(&c.AdminPassword, "admin-password", env("YOMEKURO_ADMIN_PASSWORD", ""), "Admin password (created on first run)")
+	flag.StringVar(&c.GoogleClientID, "google-client-id", env("YOMEKURO_GOOGLE_CLIENT_ID", ""), "Google OAuth client ID")
+	flag.StringVar(&c.GoogleClientSecret, "google-client-secret", env("YOMEKURO_GOOGLE_CLIENT_SECRET", ""), "Google OAuth client secret")
+	flag.StringVar(&c.GoogleRedirectURL, "google-redirect-url", env("YOMEKURO_GOOGLE_REDIRECT_URL", ""), "Google OAuth callback URL")
 	flag.BoolVar(&c.ScanOnStart, "scan-on-start", boolEnv("YOMEKURO_SCAN_ON_START", true), "Run full library scan on startup")
 	flag.IntVar(&c.JobsPollIntervalMS, "jobs-poll-interval-ms", intEnv("YOMEKURO_JOBS_POLL_INTERVAL_MS", 20000), "How often (ms) the Settings page polls for conversion job updates")
 	flag.IntVar(&c.ZipCacheSize, "zip-cache-size", intEnv("YOMEKURO_ZIP_CACHE_SIZE", 20), "Number of open EPUB archives kept cached")
