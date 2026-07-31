@@ -6,7 +6,7 @@
 
 Включает в себя отдельный **конвертер**, превращающий папки с картинками манги в EPUB с фиксированной вёрсткой и OCR-слоем текста для [Yomitan](https://github.com/themoeway/yomitan).
 
-**Живое демо:** https://yomekuro.kubehomelab.space — логин `test` / `test`, чтобы просто посмотреть.
+**Живое демо:** https://yomekuro.truebad0ur.space — логин `test` / `test`, чтобы просто посмотреть.
 
 ---
 
