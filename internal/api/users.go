@@ -21,6 +21,7 @@ func (s *Server) listUsers(w http.ResponseWriter, r *http.Request) {
 		Username  string `json:"username"`
 		IsAdmin   bool   `json:"is_admin"`
 		CreatedAt string `json:"created_at"`
+		Online    bool   `json:"online"`
 	}
 	dtos := make([]userDTO, len(users))
 	for i, u := range users {
@@ -29,6 +30,7 @@ func (s *Server) listUsers(w http.ResponseWriter, r *http.Request) {
 			Username:  u.Username,
 			IsAdmin:   u.IsAdmin,
 			CreatedAt: u.CreatedAt.UTC().Format("2006-01-02T15:04:05Z"),
+			Online:    u.Online,
 		}
 	}
 	respond(w, map[string]any{"items": dtos})

@@ -1208,7 +1208,7 @@ body.page-settings { max-width: 1600px; width: 95%; margin: 0 auto; padding: 0 1
 @keyframes reconvert-spin {
   to { transform: rotate(360deg); }
 }
-.dl-format-picker, .detector-size-picker {
+.dl-format-picker {
   padding: 0.3rem 0.5rem;
   font-size: 0.78rem;
   border: 1px solid var(--border);
@@ -1240,6 +1240,14 @@ body.page-settings { max-width: 1600px; width: 95%; margin: 0 auto; padding: 0 1
 .bulk-reconvert-count { color: var(--text-dim); font-size: 0.82rem; }
 .book-row-header { display: flex; align-items: center; gap: 0.5rem; }
 .book-select-checkbox { flex-shrink: 0; cursor: pointer; }
+.book-row-cover {
+  width: 2.2rem;
+  height: 3.1rem;
+  object-fit: cover;
+  border-radius: 3px;
+  flex-shrink: 0;
+  background: var(--surface);
+}
 
 .upload-field { margin-bottom: 0.9rem; }
 .upload-field-label {
@@ -1382,6 +1390,14 @@ body.page-settings { max-width: 1600px; width: 95%; margin: 0 auto; padding: 0 1
   text-transform: uppercase;
 }
 .user-badge-you { background: transparent; color: var(--text-dim); }
+.user-online-dot {
+  width: 0.55rem;
+  height: 0.55rem;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.user-online-dot.online { background: #3fb950; }
+.user-online-dot.offline { background: var(--text-dim); opacity: 0.5; }
 .user-actions { display: flex; gap: 0.4rem; }
 .user-del-btn { padding: 0.3rem 0.7rem; font-size: 0.8rem; color: #e07070; border-color: #e07070; }
 .user-del-btn:hover { background: #e07070; color: #fff; }

@@ -293,6 +293,9 @@ func pageXHTML(num int, page MokuroPage, imgHref string, ocr bool) string {
 		if len(blk.LinesCoords) == len(blk.Lines) && len(blk.Lines) > 0 {
 			ref := blockRefFontSize(blk, ocr)
 			for li, line := range blk.Lines {
+				if ocr && isDuplicateBlockLine(blk, li) {
+					continue
+				}
 				writeLineDiv(&b, line, blk.LinesCoords[li], blk.Vertical, ocr, ref)
 			}
 			continue
@@ -330,6 +333,32 @@ const (
 	// A line whose own fitted size exceeds its block's median by more than this
 	// is trusted no further than the median — see blockRefFontSize.
 	ocrFontOutlier = 1.15
+
+	// Quad lean beyond this is detector noise, not real printed tilt: genuine
+	// scan skew is a couple degrees at most, and dialogue text is never drawn
+	// at a visible angle (unlike hand-lettered SFX, which mokuro doesn't quad
+	// as selectable text anyway). Measured against a real false-positive: a
+	// plain 9-character vertical line came out at 7.7° from pure quad wobble.
+	ocrMaxLeanDeg = 4.0
+
+	// A line whose quad covers this much of its block's own box is a
+	// *candidate* whole-block re-detection — but box coverage alone isn't
+	// enough to act on (see ocrDuplicateFsRatio below): a block with just a
+	// main line plus short furigana/reading-aid lines legitimately has its
+	// main line covering most of the box too, and that's normal print, not a
+	// bug. Real case this targets: the spurious line's box was 96.7% of the
+	// block's area; its two real sibling lines were 1% and 18%.
+	ocrDuplicateLineBoxRatio = 0.8
+
+	// The box-ratio candidate above is only actually dropped if its own
+	// fitted font size is also this far below its siblings' — the real
+	// tell that it's cramming an OCR-merged multi-line read into one box,
+	// not just a normal main line next to small furigana. Two real
+	// false-positives this guards against both had completely ordinary font
+	// sizes (~20-23px, matching the book's usual range) despite covering
+	// 82-92% of their block's box; the one confirmed real spurious line had
+	// fs 8.6px against sibling lines at 11-22px — well under half.
+	ocrDuplicateFsRatio = 0.6
 )
 
 // Em cells a quad spans beyond the text's advance (so, negative): a quad wraps
@@ -407,11 +436,94 @@ func lineGeometry(coords [][]float64, text string, vertical bool) (startX, start
 		sin = (by - ay) / main
 	}
 	deg = math.Asin(math.Max(-1, math.Min(1, sin))) * 180 / math.Pi
+	deg = math.Max(-ocrMaxLeanDeg, math.Min(ocrMaxLeanDeg, deg))
 	return startX, startY, fs, deg, true
 }
 
+// True if line blk.Lines[idx] is mokuro re-detecting the whole block as an
+// extra "line" on top of the real per-column lines it already found, and
+// OCRing it into a garbled duplicate of their text — a spurious line that
+// must be dropped, not rendered: correcting its font size would still
+// overlay wrong, overlapping text on the real lines.
+//
+// Requires both: the line's quad covers most of the block's own box (a
+// necessary but NOT sufficient signal — see ocrDuplicateFsRatio's comment),
+// and its own fitted font size is well below its siblings' median. Box
+// coverage alone false-positived twice on ordinary main-line-plus-furigana
+// blocks; box coverage AND undersized font correctly separates those from
+// the one confirmed real case. Requires at least 3 lines in the block: a
+// 2-line block's main line legitimately covering most of the box is normal,
+// and there aren't enough siblings left to form a reliable size reference.
+func isDuplicateBlockLine(blk MokuroBlock, idx int) bool {
+	if len(blk.Lines) < 3 || idx >= len(blk.LinesCoords) {
+		return false
+	}
+	coords := blk.LinesCoords[idx]
+	if len(coords) == 0 {
+		return false
+	}
+	boxW, boxH := blk.Box[2]-blk.Box[0], blk.Box[3]-blk.Box[1]
+	if boxW <= 0 || boxH <= 0 {
+		return false
+	}
+	minX, minY := coords[0][0], coords[0][1]
+	maxX, maxY := minX, minY
+	for _, pt := range coords {
+		if len(pt) < 2 {
+			continue
+		}
+		minX, minY = math.Min(minX, pt[0]), math.Min(minY, pt[1])
+		maxX, maxY = math.Max(maxX, pt[0]), math.Max(maxY, pt[1])
+	}
+	lineArea := (maxX - minX) * (maxY - minY)
+	boxArea := float64(boxW * boxH)
+	if boxArea <= 0 || lineArea/boxArea < ocrDuplicateLineBoxRatio {
+		return false
+	}
+
+	localRef, hasRef := siblingMedianFs(blk, idx)
+	if !hasRef {
+		return false
+	}
+	_, _, myFs, _, ok := lineGeometry(coords, blk.Lines[idx], blk.Vertical)
+	return ok && myFs < ocrDuplicateFsRatio*localRef
+}
+
+// Median fitted font size of every OTHER line in the block (excluding idx
+// itself), or false if none. Unlike blockRefFontSize, this asks for only one
+// sibling, not three — used as a fallback for exactly the blocks
+// blockRefFontSize refuses to judge (too few substantial lines for a
+// trustworthy median), where a single sibling is still a far better estimate
+// than none. Real case: a 2-line block (a 3rd, short furigana line doesn't
+// qualify) where the outlier's own quad undershot its real font size —
+// blockRefFontSize returned 0 (needs 3+), so the correction in writeLineDiv
+// never fired and the line rendered at half its sibling's size.
+func siblingMedianFs(blk MokuroBlock, idx int) (float64, bool) {
+	var sibFs []float64
+	for i, text := range blk.Lines {
+		if i == idx {
+			continue
+		}
+		// Same filter as blockRefFontSize: a short line (furigana, a stray
+		// "." or interjection) is normally printed smaller than body text —
+		// trusting it as a size reference would corrupt the estimate.
+		if utf8.RuneCountInString(strings.TrimSpace(text)) < 6 {
+			continue
+		}
+		if _, _, fs, _, ok := lineGeometry(blk.LinesCoords[i], text, blk.Vertical); ok {
+			sibFs = append(sibFs, fs)
+		}
+	}
+	if len(sibFs) == 0 {
+		return 0, false
+	}
+	slices.Sort(sibFs)
+	return sibFs[len(sibFs)/2], true
+}
+
 // Median fitted size of a block's lines (print uses one size per block), or 0 if
-// too few. Caps lines whose OCR miscounted characters and so came out oversized.
+// too few. Corrects lines whose OCR miscounted characters and so came out
+// oversized or undersized (see writeLineDiv).
 func blockRefFontSize(blk MokuroBlock, ocr bool) float64 {
 	if !ocr {
 		return 0
@@ -420,6 +532,9 @@ func blockRefFontSize(blk MokuroBlock, ocr bool) float64 {
 	for li, line := range blk.Lines {
 		// Short lines carry too little text for a reliable fit.
 		if utf8.RuneCountInString(strings.TrimSpace(line)) < 6 {
+			continue
+		}
+		if isDuplicateBlockLine(blk, li) {
 			continue
 		}
 		if _, _, fs, _, ok := lineGeometry(blk.LinesCoords[li], line, blk.Vertical); ok {
@@ -458,8 +573,13 @@ func writeLineDiv(b *strings.Builder, text string, coords [][]float64, vertical,
 
 	if startX, startY, fs, deg, ok := lineGeometry(coords, text, vertical); ocr && ok {
 		// An outlier against the block's own size means the OCR miscounted this
-		// line's characters; the block's median is the better bet.
+		// line's characters; the block's median is the better bet. Checked both
+		// directions: too few characters detected makes fs too big, too many
+		// (e.g. the detector's quad undershooting a line's real ink) makes it
+		// too small — a real case sampled at fs 13% of its block's median.
 		if blockRef > 0 && fs > ocrFontOutlier*blockRef {
+			fs = blockRef
+		} else if blockRef > 0 && fs < blockRef/ocrFontOutlier {
 			fs = blockRef
 		}
 		_, nudge := ocrPads(vertical)

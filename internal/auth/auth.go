@@ -16,6 +16,17 @@ import (
 
 const SessionDuration = 30 * 24 * time.Hour
 
+// A session counts as "online" if its last_seen falls within this window —
+// wide enough to survive gaps between page-view requests (a reader sitting
+// on one page makes no requests at all), tight enough that closing the tab
+// reads as offline within a couple minutes.
+const onlineWindow = 2 * time.Minute
+
+// last_seen is only touched this rarely: every authenticated request would
+// otherwise fire a write, and this app's few users don't need to be tracked
+// to the second — just closely enough to answer "is anyone using it right now".
+const lastSeenUpdateThrottle = 30 * time.Second
+
 // MinPasswordLength is enforced wherever a password is set (register, admin
 // create/update user) — previously only checked for non-empty, so "a" was
 // accepted.
@@ -32,6 +43,7 @@ type UserRow struct {
 	Username  string
 	IsAdmin   bool
 	CreatedAt time.Time
+	Online    bool
 }
 
 func HashPassword(password string) (string, error) {
@@ -160,6 +172,12 @@ func GetUserBySession(ctx context.Context, pool *pgxpool.Pool, token string) (Us
 	if err == pgx.ErrNoRows {
 		return User{}, pgx.ErrNoRows
 	}
+	if err == nil {
+		_, _ = pool.Exec(ctx,
+			`UPDATE sessions SET last_seen = NOW() WHERE token = $1 AND last_seen < NOW() - make_interval(secs => $2)`,
+			token, lastSeenUpdateThrottle.Seconds(),
+		)
+	}
 	return u, err
 }
 
@@ -215,7 +233,13 @@ func EnsureAdmin(ctx context.Context, pool *pgxpool.Pool, username, password str
 
 func ListUsers(ctx context.Context, pool *pgxpool.Pool) ([]UserRow, error) {
 	rows, err := pool.Query(ctx,
-		`SELECT id, username, is_admin, created_at FROM users ORDER BY created_at`)
+		`SELECT u.id, u.username, u.is_admin, u.created_at,
+		        EXISTS(SELECT 1 FROM sessions s
+		               WHERE s.user_id = u.id AND s.expires_at > NOW()
+		                 AND s.last_seen > NOW() - make_interval(secs => $1))
+		 FROM users u ORDER BY u.created_at`,
+		onlineWindow.Seconds(),
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -223,7 +247,7 @@ func ListUsers(ctx context.Context, pool *pgxpool.Pool) ([]UserRow, error) {
 	var users []UserRow
 	for rows.Next() {
 		var u UserRow
-		if err := rows.Scan(&u.ID, &u.Username, &u.IsAdmin, &u.CreatedAt); err != nil {
+		if err := rows.Scan(&u.ID, &u.Username, &u.IsAdmin, &u.CreatedAt, &u.Online); err != nil {
 			return nil, err
 		}
 		users = append(users, u)

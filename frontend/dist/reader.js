@@ -56,6 +56,22 @@ const bookmarkCount = document.getElementById('bookmark-count');
 const bookmarksPanel = document.getElementById('bookmarks-panel');
 const bookmarksClose = document.getElementById('bookmarks-close');
 const bookmarksList = document.getElementById('bookmarks-list');
+const btnBmToggle = document.getElementById('btn-bm-toggle');
+
+// Off by default: selecting text just selects text. On: a selection opens the
+// bookmark popup (see onSelectionEnd). Persisted so it survives navigating
+// between chapters/books, same pattern as the cache-mode toggle.
+let bookmarkingEnabled = localStorage.getItem('bookmarkingEnabled') === 'on';
+function applyBmToggleUI() {
+  btnBmToggle.textContent = `Bookmarking: ${bookmarkingEnabled ? 'On' : 'Off'}`;
+  btnBmToggle.classList.toggle('active', bookmarkingEnabled);
+}
+applyBmToggleUI();
+btnBmToggle.addEventListener('click', () => {
+  bookmarkingEnabled = !bookmarkingEnabled;
+  localStorage.setItem('bookmarkingEnabled', bookmarkingEnabled ? 'on' : 'off');
+  applyBmToggleUI();
+});
 
 function closePanels() {
   tocPanel.classList.remove('open');
@@ -332,6 +348,7 @@ function renderBookmarks() {
 document.addEventListener('mouseup', onSelectionEnd);
 
 function onSelectionEnd() {
+  if (!bookmarkingEnabled) return;
   const sel = window.getSelection();
   if (!sel || sel.isCollapsed || sel.rangeCount === 0) return;
   const range = sel.getRangeAt(0);
@@ -961,6 +978,17 @@ btnPrev.addEventListener('click', goPrev);
 btnNext.addEventListener('click', goNext);
 btnPrevB.addEventListener('click', goPrev);
 btnNextB.addEventListener('click', goNext);
+
+// Ctrl+wheel / trackpad pinch (browsers report both as a wheel event with
+// ctrlKey set) — zoom the manga page itself via the same zoomLevel used by
+// Ctrl+/-/0, instead of letting the browser zoom the whole page chrome.
+content.addEventListener('wheel', e => {
+  if (!(isFixedLayout && fixedDoc && e.ctrlKey)) return;
+  e.preventDefault();
+  const factor = Math.pow(ZOOM_STEP, -e.deltaY / 100);
+  zoomLevel = Math.min(ZOOM_MAX, Math.max(1.0, zoomLevel * factor));
+  renderCurrentFixed();
+}, { passive: false });
 
 document.addEventListener('keydown', e => {
   if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;

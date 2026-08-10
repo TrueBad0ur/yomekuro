@@ -6,7 +6,7 @@ Self-hosted EPUB library for Japanese light novels and manga. Single binary + Po
 
 Includes a companion **converter** that turns manga image folders into fixed-layout EPUBs with OCR text overlay for [Yomitan](https://github.com/themoeway/yomitan).
 
-**Live demo:** https://yomekuro.truebad0ur.space — log in with `test` / `test` to look around.
+**Live demo:** https://yomekuro.kubehomelab.space — log in with `test` / `test` to look around.
 
 ---
 
@@ -155,10 +155,9 @@ can be redone from a raw scan but a lost raw scan is gone for good.
 Settings → Manage Books lists every book already in a library, per volume:
 
 - **Reconvert (full OCR)** — re-runs OCR from scratch (not a cache-reuse
-  rebuild) for one volume or the whole book, at a chosen text-detector
-  resolution (2048/3072/3584 — higher catches more but needs more GPU VRAM).
-  Only available while the book's original raw scan (`<name>-in/`) is still
-  on disk — shows "no raw scan" otherwise. A **⚠ raw scan changed** badge
+  rebuild) for one volume or the whole book. Only available while the book's
+  original raw scan (`<name>-in/`) is still on disk — shows "no raw scan"
+  otherwise. A **⚠ raw scan changed** badge
   appears on any volume whose raw-scan files were modified on disk (page
   reordered/replaced by hand) more recently than its last conversion, so a
   stale EPUB is easy to spot without comparing timestamps yourself.
@@ -367,8 +366,10 @@ this repo anyway):
 
 ## Converter (manga OCR → EPUB)
 
-Uses [mokuro](https://github.com/kha-white/mokuro) for Japanese text detection.
-`converter/docker-compose.yml` defines three services: `converter` (CPU,
+Uses [mokuro](https://github.com/kha-white/mokuro) to orchestrate Japanese
+text OCR (page discovery, caching, `.mokuro` output) and
+[manga-ocr](https://github.com/kha-white/manga-ocr) to read each detected
+line. `converter/docker-compose.yml` defines three services: `converter` (CPU,
 one-shot CLI), `converter-gpu` (AMD ROCm, one-shot CLI), and `converter-worker`
 (AMD ROCm, persistent — drains the upload queue below).
 
@@ -450,14 +451,49 @@ docker compose -f converter/docker-compose.yml run --rm converter \
 
 Model weights download on first run, cached in `converter/data/`.
 
-### OCR quality vs. speed
+### OCR quality: text-line grouping
 
-The text detector runs at double mokuro's own default resolution, trading
-roughly 2-3x more time per page for meaningfully fewer misreads — a small
-numbered-list marker or dense footer text is much less likely to get merged
-into a neighboring line's OCR pass. Applies to every future conversion;
-already-converted books are unaffected until reconverted (Settings →
-Converting → Reconvert).
+`converter/mokuro_run.py` replaces mokuro's own text-block detection
+(YOLO-based box detection + plain IoU non-max-suppression, grouped via
+mokuro's bundled `comic_text_detector`) with the line-detection +
+graph-based merge approach from
+[manga-image-translator](https://github.com/zyddnys/manga-image-translator)
+(vendored as the `converter/manga-image-translator` submodule, GPL-3.0 — see
+`converter/LICENSE`). Both projects call the exact same underlying detector
+model/checkpoint; only the post-processing differs.
+
+mokuro's YOLO+NMS grouping had two failure modes on real scans:
+
+- **Nested/overlapping detections aren't caught.** IoU-based NMS compares two
+  boxes' overlap as a fraction of their *combined* area, so a small spurious
+  detection sitting almost entirely inside a much larger real one keeps a low
+  IoU score and survives — it renders as a garbled, often diagonal duplicate
+  laid directly over real text.
+- **Blocks with only 2 lines have no reliable font-size reference.** Sizing a
+  line's rendered text leans on comparing it against its sibling lines in the
+  same block; with only one sibling, an OCR-miscounted line's size can't be
+  corrected against anything.
+
+manga-image-translator's approach drops YOLO block detection entirely: the
+detector's segmentation branch yields individual text-line polygons directly,
+and a separate step groups them into blocks via pairwise
+distance/font-size/angle compatibility plus an MST-based outlier split (so a
+chain of transitively-close lines doesn't over-merge). This has no notion of
+one detection "containing" another, so the nested-duplicate failure mode
+doesn't arise, and blocks aren't capped at what a single YOLO box captured, so
+a real 2-line block can end up grouped with a trustworthy size reference.
+
+This grouping step turned out to be sensitive to the detector's input
+resolution — it's calibrated against manga-image-translator's own default
+(`2048`px), and running it at a higher resolution (mokuro's own tuning, see
+git history) reintroduces instability: the *detection* itself stays
+deterministic run-to-run, but the *merge* step's distance-based thresholds
+stop matching the resolution, and the same page can group cleanly on one run
+and produce garbled/fragmented duplicates on the next. Verified directly:
+15/15 repeated runs across 5 pages were bit-for-bit identical at 2048px, while
+3072px reproduced the same known-bad garbled block deterministically as well
+— i.e. both are individually stable, just at very different quality — so this
+isn't GPU noise, it's a real resolution/calibration mismatch.
 
 ### AMD GPU (ROCm)
 

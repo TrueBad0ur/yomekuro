@@ -16,7 +16,7 @@ func main() {
 	output := flag.String("output", "", "Output directory for EPUB files")
 	volume := flag.String("volume", "", "Process only this volume subdirectory name (e.g. 'Dungeon Meshi v01')")
 	noCache := flag.Bool("no-cache", false, "Re-run OCR even if cached results exist")
-	detectorSize := flag.Int("detector-size", DefaultDetectorSize, "Text-detector input resolution in px (higher = slower, fewer merged-line misreads on dense scans)")
+	detectorSize := flag.Int("detector-size", DefaultDetectorSize, "Text-detector input resolution in px — leave at the default; the graph-merge text-line grouping is calibrated against it, and higher values make grouping less reliable, not more detailed")
 	watch := flag.Bool("watch", false, "Run as a persistent worker: drain yomekuro's upload job queue and poll --library for manually-created <name>-in/ folders")
 	library := flag.String("library", env("CONVERTER_LIBRARY", "/library"), "Library root to poll for manually-created <name>-in/ folders (--watch mode only; env CONVERTER_LIBRARY)")
 	pollInterval := flag.Duration("poll-interval", envDuration("CONVERTER_POLL_INTERVAL", 10*time.Second), "Poll interval for --watch mode (env CONVERTER_POLL_INTERVAL)")

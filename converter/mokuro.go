@@ -250,8 +250,10 @@ func runMokuro(ctx context.Context, inputDir string, volumeDirs []string, noCach
 	var err error
 	for attempt := 1; attempt <= mokuroRetries; attempt++ {
 		cmd := exec.CommandContext(ctx, "python", args...)
-		// mokuro_run.py reads this to pick MokuroGenerator's detector_input_size —
-		// see its own comment for why this is configurable per job rather than fixed.
+		// mokuro_run.py's GraphMangaPageOcr reads this for the text detector's
+		// input resolution — see its own comment for why it's configurable per
+		// job rather than fixed, and README's "OCR quality" section for why it
+		// should stay at DefaultDetectorSize in practice.
 		cmd.Env = append(os.Environ(), fmt.Sprintf("MOKURO_DETECTOR_INPUT_SIZE=%d", detectorSize))
 		cmd.Stdout = &progressThrottleWriter{dst: os.Stdout, every: progressEvery}
 		cmd.Stderr = &progressThrottleWriter{dst: os.Stderr, every: progressEvery, onVolume: onVolume}

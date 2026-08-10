@@ -1,3 +1,6 @@
 [submodule "converter/mokuro"]
 	path = converter/mokuro
 	url = https://github.com/kha-white/mokuro
+[submodule "converter/manga-image-translator"]
+	path = converter/manga-image-translator
+	url = https://github.com/zyddnys/manga-image-translator.git

@@ -39,6 +39,19 @@ RUN pip install --no-cache-dir /mokuro sentencepiece "transformers==5.12.1" && \
     cp -r /mokuro/mokuro/assets \
       "$(python3 -c 'import importlib.util,pathlib; print(pathlib.Path(importlib.util.find_spec("mokuro").origin).parent)')"
 
+# Only the textline-merge piece of manga-image-translator (see mokuro_run.py's
+# GraphMangaPageOcr for why) — not the full package, whose own __init__.py
+# chain pulls in unrelated translator/inpainting/rendering deps we don't want.
+# mit_shim/ supplies our own minimal __init__.py files; the actual algorithm
+# files come from the submodule. GPL-3.0 (see converter/LICENSE) — this is why
+# it's kept to these four files instead of e.g. installing the whole package.
+RUN pip install --no-cache-dir einops py3langid requests
+COPY mit_shim/manga_translator/ /mit/manga_translator/
+COPY manga-image-translator/manga_translator/utils/generic.py /mit/manga_translator/utils/generic.py
+COPY manga-image-translator/manga_translator/utils/generic2.py /mit/manga_translator/utils/generic2.py
+COPY manga-image-translator/manga_translator/utils/textblock.py /mit/manga_translator/utils/textblock.py
+COPY manga-image-translator/manga_translator/textline_merge/__init__.py /mit/manga_translator/textline_merge/__init__.py
+
 COPY mokuro_run.py /mokuro_run.py
 COPY --from=builder /converter /converter
 ENTRYPOINT ["/converter"]

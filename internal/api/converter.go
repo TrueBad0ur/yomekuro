@@ -2,6 +2,7 @@ package api
 
 import (
 	"archive/zip"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -17,6 +18,7 @@ import (
 	"unicode"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 	shared "github.com/truebad0ur/yomekuro-shared"
 	"github.com/truebad0ur/yomekuro/internal/archive"
 	"github.com/truebad0ur/yomekuro/internal/db"
@@ -686,6 +688,21 @@ type reconvertCandidateDTO struct {
 	Kind       string               `json:"kind"` // "epub" (folder of volumes) or "html" (one flat file)
 	Volumes    []reconvertVolumeDTO `json:"volumes"`
 	HasRawScan bool                 `json:"has_raw_scan"`
+	CoverURL   string               `json:"cover_url,omitempty"`
+}
+
+// coverURLForPath looks up the scanned books row for a given file path (the
+// first volume's .epub, or the .html file itself) and, if it has a cover,
+// returns the same /api/books/{id}/cover URL the home page grid uses. This
+// list is folder-name-based (see listReconvertable's own comment on why it
+// can't use /api/series), so a cover can only be found this way — by exact
+// on-disk path, not by matching names across the two spaces.
+func coverURLForPath(ctx context.Context, pool *pgxpool.Pool, path string) string {
+	b, ok, err := db.GetBookByPath(ctx, pool, path)
+	if err != nil || !ok || b.CoverPath == "" {
+		return ""
+	}
+	return fmt.Sprintf("/api/books/%s/cover", db.UUIDString(b.ID))
 }
 
 // epubHasImages is false for a plain reflowable (born-digital) EPUB — distinct
@@ -753,7 +770,11 @@ func (s *Server) listReconvertable(w http.ResponseWriter, r *http.Request) {
 			}
 			volumes[i] = reconvertVolumeDTO{Name: n, HasImages: epubHasImages(byName[n]), ModifiedAt: fileModTime(byName[n]), NeedsReconvert: needsReconvert}
 		}
-		items = append(items, reconvertCandidateDTO{Name: e.Name(), Kind: "epub", Volumes: volumes, HasRawScan: hasRawScan})
+		coverURL := ""
+		if len(names) > 0 {
+			coverURL = coverURLForPath(r.Context(), s.db, byName[names[0]])
+		}
+		items = append(items, reconvertCandidateDTO{Name: e.Name(), Kind: "epub", Volumes: volumes, HasRawScan: hasRawScan, CoverURL: coverURL})
 	}
 
 	// HTML-library books: one standalone .html file each, never converted.
@@ -773,6 +794,7 @@ func (s *Server) listReconvertable(w http.ResponseWriter, r *http.Request) {
 				{Name: name, HasImages: false, ModifiedAt: fileModTime(filepath.Join(lib.Path, e.Name()))},
 			},
 			HasRawScan: false,
+			CoverURL:   coverURLForPath(r.Context(), s.db, filepath.Join(lib.Path, e.Name())),
 		})
 	}
 	if items == nil {
@@ -791,21 +813,22 @@ func (s *Server) listReconvertable(w http.ResponseWriter, r *http.Request) {
 // whole book in a single request, unchanged.
 func (s *Server) reconvertSeries(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		LibraryID    string   `json:"library_id"`
-		Name         string   `json:"name"`
-		Volume       string   `json:"volume"`
-		Volumes      []string `json:"volumes"`
-		DetectorSize int      `json:"detector_size"`
+		LibraryID string   `json:"library_id"`
+		Name      string   `json:"name"`
+		Volume    string   `json:"volume"`
+		Volumes   []string `json:"volumes"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		respondError(w, http.StatusBadRequest, "invalid JSON")
 		return
 	}
-	// Only these two are UI-offered; 4096 OOMs the detector on this GPU's 8GB VRAM.
-	detectorSize := 3072
-	if req.DetectorSize == 2048 || req.DetectorSize == 3584 {
-		detectorSize = req.DetectorSize
-	}
+	// The graph-merge text-line grouping (see converter/mokuro_run.py) is
+	// calibrated against this resolution — higher values desync its
+	// distance-based merge thresholds and make results less reliable, not
+	// more detailed, so this is no longer a user-facing choice. Keep this in
+	// sync with converter.DefaultDetectorSize (different Go module, can't
+	// import the constant directly).
+	detectorSize := 2048
 	libID, ok := parseID(w, req.LibraryID)
 	if !ok {
 		return

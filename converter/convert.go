@@ -35,8 +35,12 @@ func acquireGPU(ctx context.Context) error {
 func releaseGPU() { <-gpuSem }
 
 // DefaultDetectorSize is the text-detector's input resolution unless a job (or
-// the CLI) asks for something else — see CLAUDE.md's OCR-quality notes.
-const DefaultDetectorSize = 3072
+// the CLI) asks for something else. Matches manga-image-translator's own
+// default — the graph-merge text-line grouping (see mokuro_run.py) is
+// calibrated against it; higher values desync its distance-based merge
+// thresholds, reproducibly causing both fragmented/garbled grouping and
+// worse OCR (less context per crop) — see README's "OCR quality" section.
+const DefaultDetectorSize = 2048
 
 // Convert OCRs input (volume subdirs, or one flat image folder) into one EPUB
 // per volume. Cancelling ctx kills mokuro; volumes already built are kept.

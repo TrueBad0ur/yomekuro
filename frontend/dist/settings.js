@@ -30,6 +30,7 @@ function init() {
     setInterval(() => { if (shouldPoll('upload')) loadConversionJobs(); }, 20000);
   });
   loadUsers();
+  setInterval(() => { if (shouldPoll('users-section')) loadUsers(); }, 20000);
   loadSystemStatus();
   startSystemStatusPolling();
   showSettingsSection(location.hash.slice(1));
@@ -682,8 +683,8 @@ if (bulkReconvertBtn) {
       // button's own request shape.
       const allSelected = book && volSet.size === book.volumes.length;
       const body = allSelected
-        ? { library_id: selectedBooksLibraryId, name, volume: '', detector_size: 3072 }
-        : { library_id: selectedBooksLibraryId, name, volumes: [...volSet], detector_size: 3072 };
+        ? { library_id: selectedBooksLibraryId, name, volume: '' }
+        : { library_id: selectedBooksLibraryId, name, volumes: [...volSet] };
       selectedVolumes.delete(name);
       try {
         const res = await fetch('/api/converter/reconvert', {
@@ -733,7 +734,10 @@ function renderBooksList() {
       // picker, no reconvert (never went through this app's conversion at all).
       return `
       <div class="library-card">
-        <div class="library-card-name">${esc(s.name)}</div>
+        <div class="book-row-header">
+          ${s.cover_url ? `<img class="book-row-cover" src="${esc(s.cover_url)}" alt="" loading="lazy" onerror="this.remove()">` : ''}
+          <div class="library-card-name">${esc(s.name)}</div>
+        </div>
         <div class="library-card-footer">
           <span class="library-card-count">HTML file</span>
           ${analyzedLabel}
@@ -774,11 +778,6 @@ function renderBooksList() {
             <button class="reconvert-btn dl-btn" data-name="${esc(s.name)}" data-volume="${esc(v.name)}" data-format="epub">Download EPUB</button>
           `}
           ${s.has_raw_scan ? `
-            <select class="detector-size-picker" aria-label="OCR detail level" title="Text-detector resolution — higher catches more, but is slower">
-              <option value="3584">3584 (~6.3GB GPU, unverified)</option>
-              <option value="3072" selected>3072 (default, ~5.5GB GPU)</option>
-              <option value="2048">2048 (faster, ~3GB GPU)</option>
-            </select>
             <button class="reconvert-btn" data-name="${esc(s.name)}" data-volume="${esc(v.name)}" ${jobActive ? 'disabled title="A conversion job is already running for this book"' : 'title="Redoes OCR for this volume only — other volumes just rebuild fast from cache, no extra GPU time"'}>${jobActive ? 'Converting…' : 'Reconvert (full OCR)'}</button>
           ` : ''}
           <button class="job-delete-btn volume-delete-btn" data-name="${esc(s.name)}" data-volume="${esc(v.name)}">Delete</button>
@@ -789,6 +788,7 @@ function renderBooksList() {
     return `
     <div class="library-card">
       <div class="book-row-header">
+        ${s.cover_url ? `<img class="book-row-cover" src="${esc(s.cover_url)}" alt="" loading="lazy" onerror="this.remove()">` : ''}
         ${s.has_raw_scan ? `<input type="checkbox" class="book-select-checkbox" data-name="${esc(s.name)}" ${allVolsSelected ? 'checked' : ''} title="Select/deselect all volumes in this book for bulk reconvert — queues even if a job is already running for this book">` : ''}
         <button class="book-expand-toggle" data-name="${esc(s.name)}" aria-expanded="${expanded}">
           <span class="book-expand-arrow">${expanded ? '▾' : '▸'}</span>
@@ -800,12 +800,7 @@ function renderBooksList() {
         <span class="library-card-count">${s.volumes.length} volume${s.volumes.length === 1 ? '' : 's'}</span>
         ${analyzedLabel}
         ${s.has_raw_scan
-          ? `<select class="detector-size-picker" aria-label="OCR detail level" title="Text-detector resolution — higher catches more, but is slower">
-              <option value="3584">3584 (~6.3GB GPU, unverified)</option>
-              <option value="3072" selected>3072 (default, ~5.5GB GPU)</option>
-              <option value="2048">2048 (faster, ~3GB GPU)</option>
-            </select>
-            <button class="reconvert-btn" data-name="${esc(s.name)}" ${jobActive ? 'disabled title="A conversion job is already running for this book"' : 'title="Redoes OCR for every volume from scratch — takes as long as the first conversion"'}>${jobActive ? 'Converting…' : 'Reconvert all (full OCR)'}</button>`
+          ? `<button class="reconvert-btn" data-name="${esc(s.name)}" ${jobActive ? 'disabled title="A conversion job is already running for this book"' : 'title="Redoes OCR for every volume from scratch — takes as long as the first conversion"'}>${jobActive ? 'Converting…' : 'Reconvert all (full OCR)'}</button>`
           : `<span class="reconvert-no-scan" title="Raw scan no longer on disk — reconvert needs a fresh upload">no raw scan</span>`}
         <button class="reconvert-btn book-rename-btn" data-name="${esc(s.name)}">Rename</button>
         <button class="job-delete-btn book-delete-btn" data-name="${esc(s.name)}">Delete</button>
@@ -954,8 +949,6 @@ document.getElementById('books-list').addEventListener('click', async (e) => {
   const card = btn.closest('.library-card');
   const errEl = card.querySelector('.reconvert-error');
   const label = btn.dataset.volume ? 'Reconvert (full OCR)' : 'Reconvert all (full OCR)';
-  const sizePicker = btn.parentElement.querySelector('.detector-size-picker');
-  const detectorSize = sizePicker ? parseInt(sizePicker.value, 10) : 2048;
   errEl.hidden = true;
   btn.disabled = true;
   btn.textContent = 'Queuing…';
@@ -967,7 +960,6 @@ document.getElementById('books-list').addEventListener('click', async (e) => {
         library_id: selectedBooksLibraryId,
         name: btn.dataset.name,
         volume: btn.dataset.volume || '',
-        detector_size: detectorSize,
       }),
     });
     if (!res.ok) {
@@ -1013,6 +1005,7 @@ function renderUsers(users) {
     row.className = 'settings-row user-row';
     row.innerHTML = `
       <div class="user-info">
+        <span class="user-online-dot ${u.online ? 'online' : 'offline'}" title="${u.online ? 'Online' : 'Offline'}"></span>
         <span class="user-name">${esc(u.username)}</span>
         ${u.is_admin ? '<span class="user-badge">Admin</span>' : ''}
         ${isSelf ? '<span class="user-badge user-badge-you">You</span>' : ''}
