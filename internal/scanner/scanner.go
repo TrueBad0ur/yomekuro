@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/truebad0ur/yomekuro/internal/coverimage"
 	"github.com/truebad0ur/yomekuro/internal/db"
 	"github.com/truebad0ur/yomekuro/internal/epub"
 	"github.com/truebad0ur/yomekuro/internal/htmlbook"
@@ -175,7 +176,8 @@ func (s *Scanner) processFile(ctx context.Context, lib db.Library, filePath stri
 			return false, fmt.Errorf("parse epub: %w", err)
 		}
 
-		coverPath, coverMT := s.saveCover(bookID, book.CoverData, book.CoverMediaType)
+		coverData, coverMediaType := coverimage.Downscale(book.CoverData, book.CoverMediaType)
+		coverPath, coverMT := s.saveCover(bookID, coverData, coverMediaType)
 
 		var pubAt *time.Time
 		if book.PublishedAt != nil {
