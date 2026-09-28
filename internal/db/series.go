@@ -2,6 +2,7 @@ package db
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -12,7 +13,7 @@ type Series struct {
 	CoverBookID [16]byte
 }
 
-func ListSeries(ctx context.Context, pool *pgxpool.Pool, libraryID string, excludeHTML bool) ([]Series, error) {
+func ListSeries(ctx context.Context, pool *pgxpool.Pool, libraryID string, excludeHTML bool, tag string) ([]Series, error) {
 	where := "series_name != '' AND series_name IS NOT NULL"
 	args := []any{}
 
@@ -24,6 +25,13 @@ func ListSeries(ctx context.Context, pool *pgxpool.Pool, libraryID string, exclu
 	}
 	if excludeHTML {
 		where += " AND format != 'html'"
+	}
+	if tag != "" {
+		args = append(args, tag)
+		where += fmt.Sprintf(` AND EXISTS (
+			SELECT 1 FROM book_tags bt2 JOIN tags t2 ON t2.id = bt2.tag_id
+			WHERE bt2.book_id = b.id AND t2.name = $%d
+		)`, len(args))
 	}
 
 	rows, err := pool.Query(ctx, `

@@ -41,6 +41,7 @@ func Downscale(data []byte, mediaType string) ([]byte, string) {
 	if err != nil {
 		return data, mediaType
 	}
+	img = trimWhitespaceMargins(img)
 
 	b := img.Bounds()
 	w, h := b.Dx(), b.Dy()
@@ -68,6 +69,79 @@ func Downscale(data []byte, mediaType string) ([]byte, string) {
 		return data, mediaType
 	}
 	return buf.Bytes(), "image/jpeg"
+}
+
+// whiteLevel is the per-channel (8-bit) threshold above which a pixel counts
+// as "blank canvas" rather than actual artwork.
+const whiteLevel = 250
+
+// contentFraction is the minimum share of sampled pixels in a column/row
+// that must be non-blank for that column/row to count as "has content".
+const contentFraction = 0.02
+
+// trimWhitespaceMargins cuts off a wide blank margin some raw scans leave
+// next to the actual cover art — e.g. a real cover found in the wild:
+// 1521x1080, cover artwork occupying only the left ~half, the rest plain
+// white canvas. A centered object-fit:cover crop (see targetW/targetH above)
+// on the untrimmed image splits the difference: half the character cropped
+// off on one side, blank white filling the other. Only landscape-ish
+// sources (aspect > 1.15, the same fused-two-page-spread threshold reader.js
+// uses) are even considered, and only if trimming removes a substantial
+// margin (>15% of width) — a normal wraparound/spread cover with art filling
+// the whole canvas has no such margin and is left untouched.
+func trimWhitespaceMargins(img image.Image) image.Image {
+	b := img.Bounds()
+	w, h := b.Dx(), b.Dy()
+	if w <= h*115/100 {
+		return img
+	}
+
+	minContent := int(float64(h) * contentFraction)
+	left := findContentColumn(img, b, minContent, 1)
+	right := findContentColumn(img, b, minContent, -1)
+	if left < 0 || right < 0 || right <= left {
+		return img
+	}
+
+	if float64(right-left+1) >= float64(w)*0.85 {
+		return img
+	}
+
+	const pad = 4
+	left = max(b.Min.X, left-pad)
+	right = min(b.Max.X-1, right+pad)
+
+	type subImager interface {
+		SubImage(image.Rectangle) image.Image
+	}
+	si, ok := img.(subImager)
+	if !ok {
+		return img
+	}
+	return si.SubImage(image.Rect(left, b.Min.Y, right+1, b.Max.Y))
+}
+
+// findContentColumn scans columns from one edge (dir=1 for left-to-right,
+// dir=-1 for right-to-left) and returns the first column with enough
+// non-blank pixels, or -1 if none found.
+func findContentColumn(img image.Image, b image.Rectangle, minContent, dir int) int {
+	start, end := b.Min.X, b.Max.X
+	if dir < 0 {
+		start, end = b.Max.X-1, b.Min.X-1
+	}
+	for x := start; x != end; x += dir {
+		cnt := 0
+		for y := b.Min.Y; y < b.Max.Y; y += 2 { // sample every other row
+			r, g, bl, _ := img.At(x, y).RGBA()
+			if r>>8 < whiteLevel || g>>8 < whiteLevel || bl>>8 < whiteLevel {
+				cnt++
+				if cnt > minContent {
+					return x
+				}
+			}
+		}
+	}
+	return -1
 }
 
 func decode(data []byte, mediaType string) (image.Image, error) {

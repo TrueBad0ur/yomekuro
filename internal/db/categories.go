@@ -31,10 +31,11 @@ func EnsureDefaultCategory(ctx context.Context, pool *pgxpool.Pool, userID [16]b
 	return err
 }
 
+// ListUserCategories does not call EnsureDefaultCategory — that only ever
+// runs once, at account creation (see auth.CreateUser/GetOrCreateGoogleUser),
+// so a user who deletes "Read Later" doesn't have it silently reappear the
+// next time this list loads.
 func ListUserCategories(ctx context.Context, pool *pgxpool.Pool, userID [16]byte) ([]UserCategory, error) {
-	if err := EnsureDefaultCategory(ctx, pool, userID); err != nil {
-		return nil, err
-	}
 	rows, err := pool.Query(ctx, `
 		SELECT c.id, c.user_id, c.name, c.is_system, c.created_at,
 		       cs.series_name,
@@ -101,10 +102,14 @@ func RenameUserCategory(ctx context.Context, pool *pgxpool.Pool, id, userID [16]
 	return c, err
 }
 
+// DeleteUserCategory removes any category the user owns, including the
+// default "Read Later" system category — EnsureDefaultCategory only ever
+// runs once, at account creation, so deleting it here is permanent rather
+// than reappearing on the next category list.
 func DeleteUserCategory(ctx context.Context, pool *pgxpool.Pool, id, userID [16]byte) (bool, error) {
 	tag, err := pool.Exec(ctx, `
 		DELETE FROM user_categories
-		WHERE id = $1 AND user_id = $2 AND NOT is_system`, id, userID)
+		WHERE id = $1 AND user_id = $2`, id, userID)
 	if err != nil {
 		return false, err
 	}

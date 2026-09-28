@@ -479,6 +479,7 @@ type conversionJobDTO struct {
 	CurrentVolume string `json:"current_volume,omitempty"`
 	StopRequested bool   `json:"stop_requested,omitempty"`
 	ForceOCR      bool   `json:"force_ocr,omitempty"`
+	Manual        bool   `json:"manual,omitempty"`
 	Volume        string `json:"volume,omitempty"`
 	DetectorSize  int    `json:"detector_size,omitempty"`
 	UpdatedAt     string `json:"updated_at"`
@@ -502,6 +503,7 @@ func (s *Server) listConversionJobs(w http.ResponseWriter, r *http.Request) {
 			CurrentVolume: j.CurrentVolume,
 			StopRequested: j.StopRequested,
 			ForceOCR:      j.ForceOCR,
+			Manual:        j.Manual,
 			Volume:        j.Volume,
 			DetectorSize:  j.DetectorSize,
 			UpdatedAt:     j.UpdatedAt.UTC().Format("2006-01-02T15:04:05Z"),
@@ -965,7 +967,10 @@ func (s *Server) deleteConversionJob(w http.ResponseWriter, r *http.Request) {
 	}
 	// Only a never-succeeded job's input is disposable; wiping a 'done'/'paused'
 	// job's shared raw scan has deleted a folder a live reconvert was reading.
-	if inputPath != "" && !j.ForceOCR && j.Status != "done" && j.Status != "paused" {
+	// A manual-folder job's input is that folder itself (the user's own raw
+	// scan, not disposable staging) and must never be auto-deleted regardless
+	// of status.
+	if inputPath != "" && !j.ForceOCR && !j.Manual && j.Status != "done" && j.Status != "paused" {
 		os.RemoveAll(inputPath)
 	}
 	w.WriteHeader(http.StatusNoContent)

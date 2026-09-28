@@ -444,7 +444,7 @@ async function loadConversionJobs() {
     const label = stopping ? 'Stopping…' : (stoppable ? 'Stop' : 'Remove');
     return `
     <div class="library-card">
-      <div class="library-card-name">${esc(j.name)}${j.force_ocr ? ` <span class="job-reconvert-badge">${j.volume ? 'OCR re-run: ' + esc(j.volume) : 'OCR re-run'}</span>` : ''}</div>
+      <div class="library-card-name">${esc(j.name)}${j.force_ocr ? ` <span class="job-reconvert-badge">${j.volume ? 'OCR re-run: ' + esc(j.volume) : 'OCR re-run'}</span>` : ''}${j.manual ? ` <span class="job-reconvert-badge">Detected folder</span>` : ''}</div>
       ${(j.status === 'running' || j.status === 'paused') && j.current_volume ? `<div class="job-current-volume">${j.status === 'paused' ? 'Paused at ' : ''}${esc(j.current_volume)}</div>` : ''}
       <div class="library-card-footer">
         <span class="library-card-count job-status-${esc(j.status)}">${esc(j.status)}</span>

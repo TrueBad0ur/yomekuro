@@ -59,7 +59,30 @@ func drainQueue(ctx context.Context, pool *pgxpool.Pool) {
 const stopPollInterval = 2 * time.Second
 
 func processQueuedJob(ctx context.Context, pool *pgxpool.Pool, j *job) {
-	slog.Info("watch: converting", "job", j.Name, "input", j.InputPath, "output", j.OutputPath)
+	detectorSize := j.DetectorSize
+	if detectorSize == 0 {
+		detectorSize = DefaultDetectorSize
+	}
+	// A fresh upload's staging dir is disposable on total failure/early stop;
+	// a reconvert's or a manual folder's input/output are shared, permanent
+	// paths and must never be wiped that way. A manual job normally never
+	// passes through here (its own goroutine in scanManualFoldersIn drives
+	// it directly) — but Pause/Resume re-queues it as a plain 'pending' row,
+	// which claimNextJob picks up generically, so j.Manual must be checked
+	// here too or a resumed manual job would lose that protection.
+	runTrackedConversion(ctx, pool, j.ID, j.Name, j.InputPath, j.OutputPath, j.Volume, j.ForceOCR, detectorSize, !j.ForceOCR && !j.Manual)
+}
+
+// runTrackedConversion drives one DB-tracked conversion (queued upload,
+// reconvert, or a detected manual "-in" folder) through Convert(), keeping
+// conversion_jobs' status/current_volume live and honouring stop/pause
+// requests the same way regardless of where the job came from.
+// allowCleanupOnEmpty gates whether a stop/failure with zero volumes done
+// wipes input/output: true only for a fresh upload's own disposable staging
+// dir, false for anything pointing at a shared/persistent folder that must
+// never be deleted out from under the user.
+func runTrackedConversion(ctx context.Context, pool *pgxpool.Pool, jobID, name, inputPath, outputPath, volume string, noCache bool, detectorSize int, allowCleanupOnEmpty bool) {
+	slog.Info("watch: converting", "job", name, "input", inputPath, "output", outputPath)
 
 	// pauseTriggered records which of stop/pause fired, since Convert only
 	// reports jobCtx.Err() != nil either way — the switch below needs to know.
@@ -74,19 +97,19 @@ func processQueuedJob(ctx context.Context, pool *pgxpool.Pool, j *job) {
 			case <-jobCtx.Done():
 				return
 			case <-ticker.C:
-				stop, pause, err := checkJobSignals(ctx, pool, j.ID)
+				stop, pause, err := checkJobSignals(ctx, pool, jobID)
 				if err != nil {
-					slog.Warn("watch: check job signals failed", "job", j.Name, "err", err)
+					slog.Warn("watch: check job signals failed", "job", name, "err", err)
 					continue
 				}
 				if pause {
-					slog.Info("watch: pause requested, cancelling", "job", j.Name)
+					slog.Info("watch: pause requested, cancelling", "job", name)
 					pauseTriggered.Store(true)
 					cancel()
 					return
 				}
 				if stop {
-					slog.Info("watch: stop requested, cancelling", "job", j.Name)
+					slog.Info("watch: stop requested, cancelling", "job", name)
 					cancel()
 					return
 				}
@@ -95,28 +118,24 @@ func processQueuedJob(ctx context.Context, pool *pgxpool.Pool, j *job) {
 	}()
 
 	onVolume := func(volume string) {
-		if err := updateJobVolume(ctx, pool, j.ID, volume); err != nil {
-			slog.Warn("watch: update current volume failed", "job", j.Name, "err", err)
+		if err := updateJobVolume(ctx, pool, jobID, volume); err != nil {
+			slog.Warn("watch: update current volume failed", "job", name, "err", err)
 		}
 	}
-	detectorSize := j.DetectorSize
-	if detectorSize == 0 {
-		detectorSize = DefaultDetectorSize
-	}
-	ok, fail, err := Convert(jobCtx, j.InputPath, j.OutputPath, j.Volume, j.ForceOCR, detectorSize, onVolume)
+	ok, fail, err := Convert(jobCtx, inputPath, outputPath, volume, noCache, detectorSize, onVolume)
 
 	switch {
 	case jobCtx.Err() != nil && pauseTriggered.Load():
 		// Paused: never clean up — resuming just flips status back to 'pending'.
-		slog.Info("watch: conversion paused", "job", j.Name, "volumes_done", ok)
-		markJobPaused(ctx, pool, j.ID)
+		slog.Info("watch: conversion paused", "job", name, "volumes_done", ok)
+		markJobPaused(ctx, pool, jobID)
 	case jobCtx.Err() != nil:
 		// Cancelled by the stop-poller above: a deliberate user action, not a
 		// failure (the parent ctx is always Background).
-		slog.Info("watch: conversion stopped", "job", j.Name, "volumes_done", ok)
-		markJobStopped(ctx, pool, j.ID)
-		if ok == 0 && !j.ForceOCR {
-			cleanupFailedJob(j.Name, j.InputPath, j.OutputPath)
+		slog.Info("watch: conversion stopped", "job", name, "volumes_done", ok)
+		markJobStopped(ctx, pool, jobID)
+		if ok == 0 && allowCleanupOnEmpty {
+			cleanupFailedJob(name, inputPath, outputPath)
 		}
 	case err != nil || fail > 0 || ok == 0:
 		msg := "no volumes were converted"
@@ -126,16 +145,16 @@ func processQueuedJob(ctx context.Context, pool *pgxpool.Pool, j *job) {
 		case fail > 0:
 			msg = "some volumes failed to convert"
 		}
-		slog.Error("watch: conversion unsuccessful", "job", j.Name, "detail", msg)
-		markJobFailed(ctx, pool, j.ID, msg)
-		// Only wipe staging when nothing succeeded; never wipe a reconvert's
-		// shared dirs even on total failure.
-		if ok == 0 && !j.ForceOCR {
-			cleanupFailedJob(j.Name, j.InputPath, j.OutputPath)
+		slog.Error("watch: conversion unsuccessful", "job", name, "detail", msg)
+		markJobFailed(ctx, pool, jobID, msg)
+		// Only wipe staging when nothing succeeded; never wipe a shared dir
+		// (reconvert or manual folder) even on total failure.
+		if ok == 0 && allowCleanupOnEmpty {
+			cleanupFailedJob(name, inputPath, outputPath)
 		}
 	default:
-		slog.Info("watch: conversion done", "job", j.Name, "volumes", ok)
-		markJobDone(ctx, pool, j.ID)
+		slog.Info("watch: conversion done", "job", name, "volumes", ok)
+		markJobDone(ctx, pool, jobID)
 	}
 }
 
@@ -209,16 +228,34 @@ func scanManualFoldersIn(ctx context.Context, pool *pgxpool.Pool, libraryRoot st
 		manualInProgress[inputDir] = true
 		manualInProgressMu.Unlock()
 
-		slog.Info("watch: converting manual folder", "input", inputDir, "output", outputDir)
+		libraryID, err := libraryIDForPath(ctx, pool, libraryRoot)
+		if err != nil {
+			slog.Error("watch: resolve library id for manual folder failed", "root", libraryRoot, "err", err)
+			manualInProgressMu.Lock()
+			delete(manualInProgress, inputDir)
+			manualInProgressMu.Unlock()
+			continue
+		}
+		jobID, err := createManualJob(ctx, pool, libraryID, name, inputDir, outputDir)
+		if err != nil {
+			slog.Error("watch: create manual job row failed", "input", inputDir, "err", err)
+			manualInProgressMu.Lock()
+			delete(manualInProgress, inputDir)
+			manualInProgressMu.Unlock()
+			continue
+		}
+
+		slog.Info("watch: converting manual folder", "input", inputDir, "output", outputDir, "job", jobID)
 		go func() {
 			defer func() {
 				manualInProgressMu.Lock()
 				delete(manualInProgress, inputDir)
 				manualInProgressMu.Unlock()
 			}()
-			if _, _, err := Convert(context.Background(), inputDir, outputDir, "", false, DefaultDetectorSize, nil); err != nil {
-				slog.Error("watch: manual folder conversion failed", "input", inputDir, "err", err)
-			}
+			// allowCleanupOnEmpty is always false here: inputDir is the user's
+			// own raw scan, not disposable staging, so Stop/failure must never
+			// delete it.
+			runTrackedConversion(context.Background(), pool, jobID, name, inputDir, outputDir, "", false, DefaultDetectorSize, false)
 		}()
 	}
 }

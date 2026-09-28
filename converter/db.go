@@ -55,6 +55,7 @@ type job struct {
 	InputPath    string
 	OutputPath   string
 	ForceOCR     bool
+	Manual       bool
 	Volume       string
 	DetectorSize int
 }
@@ -87,8 +88,8 @@ func claimNextJob(ctx context.Context, pool *pgxpool.Pool) (*job, error) {
 			FOR UPDATE OF p SKIP LOCKED
 			LIMIT 1
 		)
-		RETURNING id::text, name, input_path, output_path, force_ocr, volume, detector_size
-	`).Scan(&j.ID, &j.Name, &j.InputPath, &j.OutputPath, &j.ForceOCR, &j.Volume, &j.DetectorSize)
+		RETURNING id::text, name, input_path, output_path, force_ocr, manual, volume, detector_size
+	`).Scan(&j.ID, &j.Name, &j.InputPath, &j.OutputPath, &j.ForceOCR, &j.Manual, &j.Volume, &j.DetectorSize)
 	if err == pgx.ErrNoRows {
 		return nil, nil
 	}
@@ -146,12 +147,39 @@ func markJobPaused(ctx context.Context, pool *pgxpool.Pool, id string) error {
 	return err
 }
 
-// Whether any row already references inputPath — keeps the manual-folder scan
-// off folders the DB queue owns.
+// Whether inputPath already has an active row — keeps the manual-folder scan
+// off folders a queued upload or a running/paused reconvert owns right now.
+// Deliberately excludes done/failed/stopped rows: a manual job that finished
+// must not permanently block this folder from being re-picked-up if the user
+// later drops new volume subfolders into the same "-in" directory.
 func jobExistsForPath(ctx context.Context, pool *pgxpool.Pool, inputPath string) (bool, error) {
 	var exists bool
 	err := pool.QueryRow(ctx,
-		`SELECT EXISTS(SELECT 1 FROM conversion_jobs WHERE input_path = $1)`, inputPath,
+		`SELECT EXISTS(SELECT 1 FROM conversion_jobs WHERE input_path = $1 AND status IN ('pending', 'running', 'paused'))`, inputPath,
 	).Scan(&exists)
 	return exists, err
+}
+
+// libraryIDForPath resolves the library row a manual folder lives under, so
+// its conversion can get a real conversion_jobs row like any other job.
+func libraryIDForPath(ctx context.Context, pool *pgxpool.Pool, path string) (string, error) {
+	var id string
+	err := pool.QueryRow(ctx, `SELECT id::text FROM libraries WHERE path = $1`, path).Scan(&id)
+	return id, err
+}
+
+// createManualJob records a manual "-in" folder conversion in conversion_jobs
+// as already 'running', so Settings → Upload & Jobs shows its progress the
+// same way an uploaded job would — even though nothing was ever uploaded
+// through the API. manual=true marks input/output as a shared, non-disposable
+// path (see deleteConversionJob's guard in internal/api/converter.go).
+func createManualJob(ctx context.Context, pool *pgxpool.Pool, libraryID, name, inputPath, outputPath string) (string, error) {
+	var id string
+	err := pool.QueryRow(ctx, `
+		INSERT INTO conversion_jobs (library_id, name, input_path, output_path, status, manual)
+		VALUES ($1::uuid, $2, $3, $4, 'running', true)
+		RETURNING id::text`,
+		libraryID, name, inputPath, outputPath,
+	).Scan(&id)
+	return id, err
 }

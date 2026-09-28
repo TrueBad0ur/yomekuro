@@ -12,6 +12,8 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"golang.org/x/crypto/bcrypt"
+
+	"github.com/truebad0ur/yomekuro/internal/db"
 )
 
 const SessionDuration = 30 * 24 * time.Hour
@@ -74,7 +76,13 @@ func CreateUser(ctx context.Context, pool *pgxpool.Pool, username, password stri
 		 RETURNING id, username, is_admin`,
 		username, hash, isAdmin,
 	).Scan(&u.ID, &u.Username, &u.IsAdmin)
-	return u, err
+	if err != nil {
+		return User{}, err
+	}
+	if err := db.EnsureDefaultCategory(ctx, pool, u.ID); err != nil {
+		return User{}, err
+	}
+	return u, nil
 }
 
 // GetOrCreateGoogleUser resolves a Google OpenID Connect subject to a local
@@ -148,7 +156,13 @@ func GetOrCreateGoogleUser(ctx context.Context, pool *pgxpool.Pool, subject, ema
 	if err != nil {
 		return User{}, err
 	}
-	return u, tx.Commit(ctx)
+	if err := tx.Commit(ctx); err != nil {
+		return User{}, err
+	}
+	if err := db.EnsureDefaultCategory(ctx, pool, u.ID); err != nil {
+		return User{}, err
+	}
+	return u, nil
 }
 
 func GetUserByUsername(ctx context.Context, pool *pgxpool.Pool, username string) (User, string, error) {

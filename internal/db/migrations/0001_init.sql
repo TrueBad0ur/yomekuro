@@ -88,6 +88,7 @@ CREATE TABLE conversion_jobs (
     stop_requested BOOLEAN NOT NULL DEFAULT false,
     pause_requested BOOLEAN NOT NULL DEFAULT false, -- like stop_requested, but never wipes input/output on cancel
     force_ocr   BOOLEAN NOT NULL DEFAULT false, -- reconvert: full OCR re-run, ignoring mokuro's cache
+    manual      BOOLEAN NOT NULL DEFAULT false, -- created by the manual "-in" folder scan, not an upload/reconvert; its input/output paths must never be auto-deleted
     volume      TEXT NOT NULL DEFAULT '', -- reconvert: limit to one volume; '' means the whole book
     detector_size INTEGER NOT NULL DEFAULT 2048, -- text-detector input resolution (px); the graph-merge text-line grouping is calibrated against this value, higher desyncs it
     created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),

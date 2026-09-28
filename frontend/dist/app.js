@@ -378,22 +378,20 @@ async function showTaggedBooks(tagName, historyMode) {
   grid.innerHTML = '<p style="padding:1.5rem;color:var(--text-dim)">Loading…</p>';
   emptyMsg.hidden = true;
 
-  const url = new URL('/api/books', location.origin);
-  url.searchParams.set('limit', '200');
-  url.searchParams.set('tag', tagName);
-  if (searchQuery) url.searchParams.set('q', searchQuery);
-
+  // Tags describe a series (every volume was tagged alike), so this browses
+  // like the rest of the library — grouped by title, not one card per book.
   let data;
   try {
-    data = await fetch(url).then(r => r.json());
+    data = await fetch(`/api/series?tag=${encodeURIComponent(tagName)}`).then(r => r.json());
   } catch {
     grid.innerHTML = '';
-    emptyMsg.textContent = 'Failed to load books.';
+    emptyMsg.textContent = 'Failed to load titles.';
     emptyMsg.hidden = false;
     return;
   }
 
-  renderBookGrid(data.items || []);
+  currentLibrarySeries = data.items || [];
+  filterLibrarySeries();
 }
 
 function renderBookGrid(books) {
@@ -689,30 +687,33 @@ function renderPersonalCategories() {
     const count = document.createElement('span');
     count.textContent = `${(category.items || []).length} title${(category.items || []).length === 1 ? '' : 's'}`;
     header.append(title, count);
-    if (!category.is_system) {
+    {
       const actions = document.createElement('span');
       actions.className = 'personal-category-actions';
-      const rename = document.createElement('button');
-      rename.textContent = 'Rename';
+      if (!category.is_system) {
+        const rename = document.createElement('button');
+        rename.textContent = 'Rename';
+        rename.addEventListener('click', async () => {
+          const name = prompt('Category name', category.name);
+          if (!name || name.trim() === category.name) return;
+          const res = await fetch(`/api/me/categories/${category.id}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name: name.trim() }),
+          });
+          if (res.ok) await refreshPersonalCategories();
+        });
+        actions.appendChild(rename);
+      }
       const remove = document.createElement('button');
       remove.textContent = 'Delete';
       remove.className = 'danger';
-      rename.addEventListener('click', async () => {
-        const name = prompt('Category name', category.name);
-        if (!name || name.trim() === category.name) return;
-        const res = await fetch(`/api/me/categories/${category.id}`, {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ name: name.trim() }),
-        });
-        if (res.ok) await refreshPersonalCategories();
-      });
       remove.addEventListener('click', async () => {
         if (!confirm(`Delete category “${category.name}”?`)) return;
         const res = await fetch(`/api/me/categories/${category.id}`, { method: 'DELETE' });
         if (res.ok) await refreshPersonalCategories();
       });
-      actions.append(rename, remove);
+      actions.appendChild(remove);
       header.appendChild(actions);
     }
     section.appendChild(header);
@@ -901,7 +902,8 @@ document.getElementById('logo-home').addEventListener('click', () => {
 
 function doSearch() {
   if (activeTag) {
-    showTaggedBooks(activeTag, 'replace');
+    filterLibrarySeries();
+    syncAppHistory('replace');
   } else if (currentView === 'library') {
     filterLibrarySeries();
     syncAppHistory('replace');
