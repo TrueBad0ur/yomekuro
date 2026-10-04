@@ -149,3 +149,19 @@ CREATE TABLE user_category_series (
     added_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     PRIMARY KEY (category_id, series_name)
 );
+
+-- Manually-curated checklist of known library defects found during raw-scan
+-- ingestion (missing covers/volumes/pages with no better source available).
+-- Not auto-populated by anything; admins add/check off entries by hand from
+-- the Settings → Missing tab.
+CREATE TABLE missing_items (
+    id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    category    TEXT NOT NULL, -- cover | volume | page
+    series_name TEXT NOT NULL,
+    description TEXT NOT NULL,
+    resolved    BOOLEAN NOT NULL DEFAULT false,
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CHECK (category IN ('cover', 'volume', 'page'))
+);
+
+CREATE INDEX idx_missing_items_category ON missing_items(category);

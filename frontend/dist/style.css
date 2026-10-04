@@ -1376,6 +1376,20 @@ body.page-settings { max-width: 1600px; width: 95%; margin: 0 auto; padding: 0 1
 }
 .logout-btn:hover { background: #e07070; color: #fff; border-color: #e07070; }
 
+.missing-category { margin-bottom: 1.5rem; }
+.missing-category-title { font-size: 0.95rem; margin: 0 0 0.5rem; }
+.missing-list { display: flex; flex-direction: column; gap: 0.4rem; margin-bottom: 0.6rem; }
+.missing-row { gap: 0.75rem; justify-content: space-between; }
+.missing-check-label { display: flex; align-items: baseline; gap: 0.5rem; font-size: 0.85rem; cursor: pointer; flex: 1; }
+.missing-check-label input[type="checkbox"] { flex-shrink: 0; cursor: pointer; }
+.missing-series { font-weight: 600; }
+.missing-desc { color: var(--text-dim); }
+.missing-row.resolved .missing-series,
+.missing-row.resolved .missing-desc { text-decoration: line-through; color: var(--text-dim); }
+.missing-add-form { gap: 0.5rem; flex-wrap: wrap; }
+.missing-add-form .missing-series-input { max-width: 220px; }
+.missing-add-form .missing-desc-input { flex: 1; min-width: 200px; }
+
 .settings-users { display: flex; flex-direction: column; gap: 0.5rem; }
 .user-row { gap: 0.75rem; }
 .user-info { display: flex; align-items: center; gap: 0.5rem; flex: 1; }

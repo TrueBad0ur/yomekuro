@@ -26,6 +26,7 @@
       <a href="#upload" class="settings-nav-link">Upload &amp; Jobs</a>
       <a href="#books" class="settings-nav-link">Manage Books</a>
       <a href="#integrity" class="settings-nav-link">Library Integrity</a>
+      <a href="#missing" class="settings-nav-link">Missing</a>
       <a href="#status" class="settings-nav-link">Server Status</a>
       <a href="#users-section" class="settings-nav-link">Users</a>
     </nav>
@@ -184,6 +185,46 @@
         </div>
         <div id="integrity-report" class="integrity-report">
           <p class="integrity-placeholder">No check has been run yet.</p>
+        </div>
+      </section>
+
+      <section class="settings-section" id="missing">
+        <h2 class="settings-section-title">Missing</h2>
+        <p class="upload-hint">
+          Manually-curated checklist of known defects in raw-scan sources (bad/missing
+          covers, whole volumes unavailable, individual pages missing) with no better
+          source found yet. Check an item off once it's fixed; it stays listed
+          (struck through) until removed.
+        </p>
+
+        <div class="missing-category">
+          <h3 class="missing-category-title">Covers</h3>
+          <div id="missing-list-cover" class="missing-list"></div>
+          <form class="settings-row missing-add-form" data-category="cover">
+            <input type="text" class="missing-series-input user-input" placeholder="Series" required>
+            <input type="text" class="missing-desc-input user-input" placeholder="Description" required>
+            <button type="submit">Add</button>
+          </form>
+        </div>
+
+        <div class="missing-category">
+          <h3 class="missing-category-title">Volumes</h3>
+          <div id="missing-list-volume" class="missing-list"></div>
+          <form class="settings-row missing-add-form" data-category="volume">
+            <input type="text" class="missing-series-input user-input" placeholder="Series" required>
+            <input type="text" class="missing-desc-input user-input" placeholder="Description" required>
+            <button type="submit">Add</button>
+          </form>
+        </div>
+
+        <div class="missing-category">
+          <h3 class="missing-category-title">Pages</h3>
+          <div id="missing-list-page" class="missing-list"></div>
+          <form class="settings-row missing-add-form" data-category="page">
+            <input type="text" class="missing-series-input user-input" placeholder="Series" required>
+            <input type="text" class="missing-desc-input user-input" placeholder="Description" required>
+            <button type="submit">Add</button>
+          </form>
         </div>
       </section>
 

@@ -129,6 +129,11 @@ func NewRouter(pool *pgxpool.Pool, sc *scanner.Scanner, w *scanner.Watcher, data
 			r.Get("/api/system-status", s.systemStatus)
 			r.Post("/api/library-integrity/check", s.checkLibraryIntegrity)
 
+			r.Get("/api/missing", s.listMissingItems)
+			r.Post("/api/missing", s.createMissingItem)
+			r.Patch("/api/missing/{id}", s.updateMissingItem)
+			r.Delete("/api/missing/{id}", s.deleteMissingItem)
+
 			r.Get("/api/users", s.listUsers)
 			r.Post("/api/users", s.createUser)
 			r.Patch("/api/users/{id}", s.updateUser)

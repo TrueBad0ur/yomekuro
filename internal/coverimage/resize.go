@@ -42,6 +42,7 @@ func Downscale(data []byte, mediaType string) ([]byte, string) {
 		return data, mediaType
 	}
 	img = trimWhitespaceMargins(img)
+	img = cropToLeftEdge(img)
 
 	b := img.Bounds()
 	w, h := b.Dx(), b.Dy()
@@ -119,6 +120,39 @@ func trimWhitespaceMargins(img image.Image) image.Image {
 		return img
 	}
 	return si.SubImage(image.Rect(left, b.Min.Y, right+1, b.Max.Y))
+}
+
+// cropToLeftEdge keeps only the leftmost "page" of a still-wide cover (a full
+// unfolded jacket scan — back cover, spine, front cover, sometimes bonus
+// material — laid out left-to-right in the file), sized to the target 2:3
+// aspect ratio. Without this, object-fit:cover in the browser (style.css's
+// .book-card img, no object-position set) center-crops the resized image,
+// which for a wraparound lands on the spine/barcode instead of the actual
+// cover art. RTL manga binding consistently puts the front cover at the
+// *left* edge of an unfolded scan, so a fixed left-anchored crop is right
+// far more often than a center crop — not universally (a scan with extra
+// bonus pages ahead of the real cover still needs a real fix later), but
+// it's the correct default until per-volume exceptions are handled.
+func cropToLeftEdge(img image.Image) image.Image {
+	b := img.Bounds()
+	w, h := b.Dx(), b.Dy()
+	if w <= h*115/100 {
+		return img
+	}
+
+	cropW := h * targetW / targetH
+	if cropW < 1 || cropW >= w {
+		return img
+	}
+
+	type subImager interface {
+		SubImage(image.Rectangle) image.Image
+	}
+	si, ok := img.(subImager)
+	if !ok {
+		return img
+	}
+	return si.SubImage(image.Rect(b.Min.X, b.Min.Y, b.Min.X+cropW, b.Max.Y))
 }
 
 // findContentColumn scans columns from one edge (dir=1 for left-to-right,

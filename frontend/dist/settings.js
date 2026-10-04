@@ -31,6 +31,7 @@ function init() {
   });
   loadUsers();
   setInterval(() => { if (shouldPoll('users-section')) loadUsers(); }, 20000);
+  loadMissing();
   loadSystemStatus();
   startSystemStatusPolling();
   showSettingsSection(location.hash.slice(1));
@@ -38,7 +39,7 @@ function init() {
 
 // ── Settings nav (one category visible at a time) ────────────────────────────
 
-const SETTINGS_SECTIONS = ['libraries', 'upload', 'books', 'integrity', 'status', 'users-section'];
+const SETTINGS_SECTIONS = ['libraries', 'upload', 'books', 'integrity', 'missing', 'status', 'users-section'];
 
 function showSettingsSection(id) {
   if (!SETTINGS_SECTIONS.includes(id)) id = 'libraries';
@@ -118,6 +119,86 @@ function renderIntegrityReport(report) {
       </span>`;
     issues.appendChild(row);
   }
+}
+
+// ── Missing (manually-curated known-defect checklist) ────────────────────────
+
+let missingItemsCache = [];
+
+async function loadMissing() {
+  try {
+    const data = await fetch('/api/missing').then(r => r.json());
+    missingItemsCache = data.items || [];
+  } catch {
+    return;
+  }
+  renderMissing();
+}
+
+function renderMissing() {
+  for (const category of ['cover', 'volume', 'page']) {
+    const list = document.getElementById(`missing-list-${category}`);
+    if (!list) continue;
+    const items = missingItemsCache.filter(m => m.category === category);
+    if (items.length === 0) {
+      list.innerHTML = '<p style="color:var(--text-dim);font-size:.85rem">Nothing here.</p>';
+      continue;
+    }
+    list.innerHTML = items.map(m => `
+      <div class="settings-row missing-row ${m.resolved ? 'resolved' : ''}">
+        <label class="missing-check-label">
+          <input type="checkbox" class="missing-checkbox" data-id="${m.id}" ${m.resolved ? 'checked' : ''}>
+          <span class="missing-series">${esc(m.series_name)}</span> —
+          <span class="missing-desc">${esc(m.description)}</span>
+        </label>
+        <button class="danger missing-delete-btn" data-id="${m.id}" title="Remove">✕</button>
+      </div>`).join('');
+  }
+}
+
+document.querySelectorAll('.missing-add-form').forEach(form => {
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const category = form.dataset.category;
+    const seriesInput = form.querySelector('.missing-series-input');
+    const descInput = form.querySelector('.missing-desc-input');
+    const series_name = seriesInput.value.trim();
+    const description = descInput.value.trim();
+    if (!series_name || !description) return;
+    const res = await fetch('/api/missing', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ category, series_name, description }),
+    });
+    if (res.ok) {
+      seriesInput.value = '';
+      descInput.value = '';
+      loadMissing();
+    }
+  });
+});
+
+for (const category of ['cover', 'volume', 'page']) {
+  const list = document.getElementById(`missing-list-${category}`);
+  if (!list) continue;
+  list.addEventListener('change', async (e) => {
+    const cb = e.target.closest('.missing-checkbox');
+    if (!cb) return;
+    await fetch(`/api/missing/${cb.dataset.id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ resolved: cb.checked }),
+    });
+    loadMissing();
+  });
+  list.addEventListener('click', async (e) => {
+    const btn = e.target.closest('.missing-delete-btn');
+    if (!btn) return;
+    if (!confirm('Remove this item permanently?')) return;
+    btn.disabled = true;
+    await fetch(`/api/missing/${btn.dataset.id}`, { method: 'DELETE' });
+    loadMissing();
+  });
 }
 
 // ── Libraries ─────────────────────────────────────────────────────────────────
