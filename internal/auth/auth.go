@@ -45,6 +45,7 @@ type UserRow struct {
 	Username  string
 	IsAdmin   bool
 	CreatedAt time.Time
+	LastSeen  *time.Time
 	Online    bool
 }
 
@@ -248,6 +249,7 @@ func EnsureAdmin(ctx context.Context, pool *pgxpool.Pool, username, password str
 func ListUsers(ctx context.Context, pool *pgxpool.Pool) ([]UserRow, error) {
 	rows, err := pool.Query(ctx,
 		`SELECT u.id, u.username, u.is_admin, u.created_at,
+		        (SELECT MAX(s.last_seen) FROM sessions s WHERE s.user_id = u.id),
 		        EXISTS(SELECT 1 FROM sessions s
 		               WHERE s.user_id = u.id AND s.expires_at > NOW()
 		                 AND s.last_seen > NOW() - make_interval(secs => $1))
@@ -261,7 +263,7 @@ func ListUsers(ctx context.Context, pool *pgxpool.Pool) ([]UserRow, error) {
 	var users []UserRow
 	for rows.Next() {
 		var u UserRow
-		if err := rows.Scan(&u.ID, &u.Username, &u.IsAdmin, &u.CreatedAt, &u.Online); err != nil {
+		if err := rows.Scan(&u.ID, &u.Username, &u.IsAdmin, &u.CreatedAt, &u.LastSeen, &u.Online); err != nil {
 			return nil, err
 		}
 		users = append(users, u)

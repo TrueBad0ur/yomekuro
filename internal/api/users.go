@@ -17,11 +17,12 @@ func (s *Server) listUsers(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	type userDTO struct {
-		ID        string `json:"id"`
-		Username  string `json:"username"`
-		IsAdmin   bool   `json:"is_admin"`
-		CreatedAt string `json:"created_at"`
-		Online    bool   `json:"online"`
+		ID        string  `json:"id"`
+		Username  string  `json:"username"`
+		IsAdmin   bool    `json:"is_admin"`
+		CreatedAt string  `json:"created_at"`
+		LastSeen  *string `json:"last_seen"`
+		Online    bool    `json:"online"`
 	}
 	dtos := make([]userDTO, len(users))
 	for i, u := range users {
@@ -31,6 +32,10 @@ func (s *Server) listUsers(w http.ResponseWriter, r *http.Request) {
 			IsAdmin:   u.IsAdmin,
 			CreatedAt: u.CreatedAt.UTC().Format("2006-01-02T15:04:05Z"),
 			Online:    u.Online,
+		}
+		if u.LastSeen != nil {
+			s := u.LastSeen.UTC().Format("2006-01-02T15:04:05Z")
+			dtos[i].LastSeen = &s
 		}
 	}
 	respond(w, map[string]any{"items": dtos})

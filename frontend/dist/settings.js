@@ -1075,6 +1075,11 @@ async function loadUsers() {
   renderUsers(data.items || []);
 }
 
+function fmtUserTimestamp(iso) {
+  if (!iso) return 'Never';
+  return new Date(iso).toLocaleString();
+}
+
 function renderUsers(users) {
   const list = document.getElementById('users-list');
   list.innerHTML = '';
@@ -1090,6 +1095,10 @@ function renderUsers(users) {
         <span class="user-name">${esc(u.username)}</span>
         ${u.is_admin ? '<span class="user-badge">Admin</span>' : ''}
         ${isSelf ? '<span class="user-badge user-badge-you">You</span>' : ''}
+        <span class="user-meta">
+          Registered ${fmtUserTimestamp(u.created_at)} &middot;
+          Last online: ${u.online ? 'now' : fmtUserTimestamp(u.last_seen)}
+        </span>
       </div>
       <div class="user-actions">
         ${!isSelf ? `
