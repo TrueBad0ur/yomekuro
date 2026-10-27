@@ -211,7 +211,7 @@ func reconcileStaleMokuroFile(mokuroDir, volume string, current map[string]bool)
 	if err != nil {
 		return
 	}
-	if err := os.WriteFile(path, out, 0644); err != nil {
+	if err := os.WriteFile(path, out, 0600); err != nil {
 		slog.Warn("could not rewrite stale mokuro file", "path", path, "err", err)
 		return
 	}

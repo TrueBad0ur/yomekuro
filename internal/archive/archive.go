@@ -21,7 +21,7 @@ import (
 // Extracts archivePath into destDir by extension, skipping OS junk and rejecting
 // zip-slip. A single wrapping directory is collapsed away (collapseSingleRoot).
 func Extract(archivePath, destDir string) error {
-	if err := os.MkdirAll(destDir, 0o755); err != nil {
+	if err := os.MkdirAll(destDir, 0o750); err != nil {
 		return fmt.Errorf("archive: mkdir dest: %w", err)
 	}
 
@@ -90,7 +90,7 @@ func extractZip(archivePath, destDir string) error {
 			return err
 		}
 		if f.FileInfo().IsDir() {
-			if err := os.MkdirAll(destPath, 0o755); err != nil {
+			if err := os.MkdirAll(destPath, 0o750); err != nil {
 				return err
 			}
 			continue
@@ -113,7 +113,7 @@ func writeEntry(destPath string, o opener, mode os.FileMode) error {
 	}
 	defer rc.Close()
 
-	if err := os.MkdirAll(filepath.Dir(destPath), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(destPath), 0o750); err != nil {
 		return err
 	}
 	if mode == 0 {
@@ -148,11 +148,11 @@ func extractTar(r io.Reader, destDir string) error {
 		}
 		switch hdr.Typeflag {
 		case tar.TypeDir:
-			if err := os.MkdirAll(destPath, 0o755); err != nil {
+			if err := os.MkdirAll(destPath, 0o750); err != nil {
 				return err
 			}
 		case tar.TypeReg:
-			if err := os.MkdirAll(filepath.Dir(destPath), 0o755); err != nil {
+			if err := os.MkdirAll(filepath.Dir(destPath), 0o750); err != nil {
 				return err
 			}
 			// Mask to plain rwx: hdr.Mode is attacker-controlled and could carry
@@ -192,7 +192,7 @@ func extract7z(archivePath, destDir string) error {
 			return err
 		}
 		if f.FileInfo().IsDir() {
-			if err := os.MkdirAll(destPath, 0o755); err != nil {
+			if err := os.MkdirAll(destPath, 0o750); err != nil {
 				return err
 			}
 			continue
@@ -227,12 +227,12 @@ func extractRar(archivePath, destDir string) error {
 			return err
 		}
 		if hdr.IsDir {
-			if err := os.MkdirAll(destPath, 0o755); err != nil {
+			if err := os.MkdirAll(destPath, 0o750); err != nil {
 				return err
 			}
 			continue
 		}
-		if err := os.MkdirAll(filepath.Dir(destPath), 0o755); err != nil {
+		if err := os.MkdirAll(filepath.Dir(destPath), 0o750); err != nil {
 			return err
 		}
 		mode := hdr.Mode()

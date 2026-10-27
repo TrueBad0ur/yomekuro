@@ -43,17 +43,18 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - uses: actions/setup-go@v6
+      - uses: actions/setup-go@v7
         with:
           go-version-file: ${{ matrix.gomod }}
 
       - name: Install gosec
         continue-on-error: true
         # actions/setup-go pins GOTOOLCHAIN=local to the exact version named by
-        # go-version-file (this repo's go.mod pins 1.25.0) — but "gosec@latest"
+        # go-version-file (this repo's go.mod pins 1.26.0) — but "gosec@latest"
         # tracks upstream and periodically bumps its own go.mod's minimum Go
-        # version ahead of that pin (hit for real: gosec v2.28.0 requires
-        # go >= 1.25.8), which GOTOOLCHAIN=local then refuses to auto-fetch,
+        # version ahead of that pin (hit for real once already, when this repo
+        # was still on 1.25.0 and gosec required 1.25.8), which GOTOOLCHAIN=local
+        # then refuses to auto-fetch,
         # so the install silently fails with "command not found" one step
         # later. auto here only affects installing the gosec binary itself,
         # not this repo's own build/test/vet — which still run against the
@@ -114,7 +115,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - uses: actions/setup-go@v6
+      - uses: actions/setup-go@v7
         with:
           go-version-file: ${{ matrix.gomod }}
 

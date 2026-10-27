@@ -31,7 +31,7 @@ func main() {
 	}
 	defer pool.Close()
 
-	if err := os.MkdirAll(filepath.Join(cfg.Data, "covers"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(cfg.Data, "covers"), 0o750); err != nil {
 		slog.Error("create data dir", "err", err)
 		os.Exit(1)
 	}

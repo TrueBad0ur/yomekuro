@@ -45,7 +45,7 @@ const DefaultDetectorSize = 2048
 // Convert OCRs input (volume subdirs, or one flat image folder) into one EPUB
 // per volume. Cancelling ctx kills mokuro; volumes already built are kept.
 func Convert(ctx context.Context, input, output, volume string, noCache bool, detectorSize int, onVolume func(string)) (ok, fail int, err error) {
-	if err := os.MkdirAll(output, 0755); err != nil {
+	if err := os.MkdirAll(output, 0750); err != nil {
 		return 0, 0, fmt.Errorf("create output dir: %w", err)
 	}
 

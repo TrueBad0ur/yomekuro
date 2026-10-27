@@ -89,7 +89,7 @@ func main() {
 		newFileName := randomID() + ext
 		newPath := filepath.Join(dataDir, "covers", newFileName)
 
-		if err := os.WriteFile(newPath, newData, 0o644); err != nil {
+		if err := os.WriteFile(newPath, newData, 0o600); err != nil {
 			log.Printf("[%d/%d] WRITE FAIL %s: %v", i+1, len(all), newPath, err)
 			failed++
 			continue

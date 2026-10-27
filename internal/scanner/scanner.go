@@ -241,7 +241,7 @@ func (s *Scanner) saveCover(bookID [16]byte, data []byte, mediaType string) (str
 	}
 	ext := coverExt(mediaType)
 	path := filepath.Join(s.dataDir, "covers", db.UUIDString(bookID)+ext)
-	if err := os.WriteFile(path, data, 0o644); err != nil {
+	if err := os.WriteFile(path, data, 0o600); err != nil {
 		slog.Warn("save cover", "path", path, "err", err)
 		return "", ""
 	}

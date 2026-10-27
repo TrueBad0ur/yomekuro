@@ -32,7 +32,7 @@ func processPDFVolumes(input, output, series string, seriesIndex map[string]floa
 		}
 
 		volDir := filepath.Join(input, name)
-		if err := os.MkdirAll(volDir, 0755); err != nil {
+		if err := os.MkdirAll(volDir, 0750); err != nil {
 			return textOK, fmt.Errorf("create volume dir for %s: %w", pdfPath, err)
 		}
 		if err := rasterizePDF(pdfPath, volDir); err != nil {

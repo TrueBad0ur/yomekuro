@@ -99,7 +99,7 @@ func extractEPUBImages(epubPath, destDir string) error {
 		return images[i].Name < images[j].Name
 	})
 
-	if err := os.MkdirAll(destDir, 0755); err != nil {
+	if err := os.MkdirAll(destDir, 0750); err != nil {
 		return err
 	}
 	for i, f := range images {
@@ -359,7 +359,7 @@ func (s *Server) uploadArchive(w http.ResponseWriter, r *http.Request) {
 		}
 		if hasText {
 			// Already has real text — place as a finished volume, no OCR needed.
-			if err := os.MkdirAll(outDir, 0755); err != nil {
+			if err := os.MkdirAll(outDir, 0750); err != nil {
 				respondInternal(w, "cannot create book folder", err)
 				return
 			}
