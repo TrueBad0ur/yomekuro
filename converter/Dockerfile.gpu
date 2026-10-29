@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1
 # AMD ROCm GPU version — amd64 only, requires a ROCm-capable host (amdgpu kernel
 # driver + /dev/kfd + /dev/dri passthrough). No NVIDIA/CUDA support.
-FROM golang:1.26-alpine AS builder
+FROM golang:1.27-alpine AS builder
 WORKDIR /app
 COPY go.mod go.sum ./
 # go.mod's "replace ... => ../shared" resolves to /shared, one level above
@@ -39,9 +39,8 @@ RUN pip install --no-cache-dir \
     --index-url https://download.pytorch.org/whl/rocm6.4
 
 COPY mokuro/ /mokuro/
-# transformers>=5.13.0 breaks loading manga-ocr-base's tokenizer; 5.12.1 is the
-# last version confirmed working.
-RUN pip install --no-cache-dir /mokuro sentencepiece "transformers==5.12.1" && \
+# Pin the transformers version validated with manga-ocr-base.
+RUN pip install --no-cache-dir /mokuro sentencepiece "transformers==5.21.1" && \
     cp -r /mokuro/mokuro/assets \
       "$(python3 -c 'import importlib.util,pathlib; print(pathlib.Path(importlib.util.find_spec("mokuro").origin).parent)')"
 
